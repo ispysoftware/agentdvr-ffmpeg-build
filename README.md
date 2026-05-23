@@ -7,7 +7,6 @@ This folder cross-builds **FFmpeg 8.1 GPL shared libraries** from source for the
 FFmpeg.AutoGen loads FFmpeg's shared libraries at runtime via P/Invoke. The libraries must be:
 
 - **The right ABI version** — FFmpeg.AutoGen 8.1 expects the 8.1 `.so` / `.dll` ABI (avcodec 62, avformat 62, avutil 60, etc.).
-- **GPL-licensed** — required for libx264 (H.264 encoding). FFmpeg's pre-built binaries are often LGPL-only.
 - **glibc 2.28-compatible** — AgentDVR targets Debian 10 (Buster), Ubuntu 18.10+, RHEL 8+, and Raspberry Pi OS Buster.
 - **Hardware-acceleration-enabled** — each platform needs its own HW accel flags; no single binary covers all.
 
