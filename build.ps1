@@ -1,11 +1,11 @@
 # build.ps1 — Cross-build FFmpeg and produce a deployable archive
-# Usage:  .\build.ps1
+# Usage:  .\build.ps1                       # prints usage
 #         .\build.ps1 -Target arm64
 #         .\build.ps1 -Target x86_64 -FfmpegVer 8.1 -OutDir .\dist
 #         .\build.ps1 -Target arm64 -NoCache
 #         .\build.ps1 -Target win64          # produces a .7z archive
 #
-# Targets:  armhf (default)  arm64  x86_64  win64
+# Targets:  armhf  arm64  x86_64  win64
 #
 # NOTE: --progress=plain is built in; do not pass it on the command line.
 #       Use -Progress auto to suppress verbose output.
@@ -14,7 +14,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet("armhf","arm64","x86_64","win64")]
-    [string]$Target     = "armhf",
+    [string]$Target     = "",
     [string]$FfmpegVer  = "8.1",
     [string]$OutDir     = "$PSScriptRoot\dist",
     [string]$ImageTag   = "",      # auto-derived from Target if empty
@@ -24,6 +24,34 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $Target) {
+    Write-Host ""
+    Write-Host "Usage:  .\build.ps1 -Target <target> [options]" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Targets (-Target):"
+    Write-Host "  armhf    linux-armhf  (Debian Buster, glibc 2.28)  V4L2 M2M"
+    Write-Host "  arm64    linux-arm64  (Debian Buster, glibc 2.28)  V4L2 M2M, Rockchip MPP, NVENC/NVDEC, Vulkan"
+    Write-Host "  x86_64   linux-x86_64 (Debian Buster, glibc 2.28)  VA-API, NVENC/NVDEC, Vulkan, AMF"
+    Write-Host "  win64    windows-x64  (MinGW-w64 cross)             D3D11VA, DXVA2, NVENC/NVDEC, AMF"
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "  -FfmpegVer <ver>       FFmpeg version               (default: 8.1)"
+    Write-Host "  -OutDir    <path>      Output directory             (default: .\dist)"
+    Write-Host "  -Progress  plain|auto  Docker build output verbosity (default: plain)"
+    Write-Host "  -NoCache               Force full rebuild (no Docker layer cache)"
+    Write-Host ""
+    Write-Host "Outputs:"
+    Write-Host "  Linux:   dist\ffmpeg<ver>-linux-<target>.tar.xz"
+    Write-Host "  win64:   dist\ffmpeg<ver>-windows-x64.7z  (DLLs + ffmpeg.exe only)"
+    Write-Host ""
+    Write-Host "Examples:"
+    Write-Host "  .\build.ps1 -Target x86_64"
+    Write-Host "  .\build.ps1 -Target win64"
+    Write-Host "  .\build.ps1 -Target arm64 -FfmpegVer 8.1"
+    Write-Host ""
+    exit 0
+}
 
 if (-not $ImageTag) { $ImageTag = "ffmpeg-${Target}-build" }
 
