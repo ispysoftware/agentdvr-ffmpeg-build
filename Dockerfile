@@ -121,6 +121,10 @@ RUN dpkg --add-architecture armhf \
       linux-libc-dev \
       linux-libc-dev:armhf \
       linux-libc-dev:arm64 \
+      # ALSA headers — multiarch so cross-compilers can find them
+      libasound2-dev \
+      libasound2-dev:armhf \
+      libasound2-dev:arm64 \
       # VA-API headers (x86_64 Intel/AMD hardware decode)
       libva-dev \
       # Vulkan runtime .so for linking — headers come from KhronosGroup GitHub
@@ -709,6 +713,8 @@ RUN . /env.sh && set -eux \
       \
       ${FF_WIN_FLAGS} \
       \
+      $([ "$FF_OS" = "linux" ] && echo "--enable-alsa") \
+      \
       --disable-ffplay \
       --disable-ffprobe \
       || { echo "=== ffmpeg configure failed ==="; \
@@ -730,6 +736,7 @@ RUN . /env.sh && set -eux \
            -exec ${STRIP} {} \; 2>/dev/null || true; \
       find ${FFMPEG_PREFIX}/bin -name '*.dll' \
            -exec ${STRIP} --strip-unneeded {} \;; \
+      cp /usr/x86_64-w64-mingw32/lib/libwinpthread-1.dll ${FFMPEG_PREFIX}/bin/; \
     else \
       ${STRIP} ${FFMPEG_PREFIX}/bin/ffmpeg; \
       find ${FFMPEG_PREFIX}/lib -name '*.so.*' \

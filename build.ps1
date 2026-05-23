@@ -1,11 +1,13 @@
 # build.ps1 — Cross-build FFmpeg and produce a deployable archive
 # Usage:  .\build.ps1                       # prints usage
-#         .\build.ps1 -Target arm64
-#         .\build.ps1 -Target x86_64 -FfmpegVer 8.1 -OutDir .\dist
-#         .\build.ps1 -Target arm64 -NoCache
-#         .\build.ps1 -Target win64          # produces a .7z archive
-#
-# Targets:  armhf  arm64  x86_64  win64
+#         .\build.ps1 -Arch x64
+#         .\build.ps1 -Arch arm64
+#         .\build.ps1 -Arch armhf
+#         .\build.ps1 -Arch win64
+#         .\build.ps1 -Arch both            # x64 + arm64
+#         .\build.ps1 -Arch all             # x64 + arm64 + armhf + win64
+#         .\build.ps1 -Arch x64 -FfmpegVer 8.1 -OutDir .\out
+#         .\build.ps1 -Arch arm64 -NoCache
 #
 # NOTE: --progress=plain is built in; do not pass it on the command line.
 #       Use -Progress auto to suppress verbose output.
@@ -13,155 +15,138 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet("armhf","arm64","x86_64","win64")]
-    [string]$Target     = "",
-    [string]$FfmpegVer  = "8.1",
-    [string]$OutDir     = "$PSScriptRoot\dist",
-    [string]$ImageTag   = "",      # auto-derived from Target if empty
+    [ValidateSet("armhf","arm64","x64","win64","both","all")]
+    [string]$Arch        = "",
+    [string]$FfmpegVer   = "8.1",
+    [string]$OutDir      = "$PSScriptRoot\out",
+    [string]$ImageTag    = "",      # auto-derived from Arch if empty
     [ValidateSet("plain","auto")]
-    [string]$Progress   = "plain",
+    [string]$Progress    = "plain",
     [switch]$NoCache
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not $Target) {
+if ($Arch -eq "") {
     Write-Host ""
-    Write-Host "Usage:  .\build.ps1 -Target <target> [options]" -ForegroundColor Cyan
+    Write-Host "Usage:  .\build.ps1 -Arch <arch> [options]" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "Targets (-Target):"
-    Write-Host "  armhf    linux-armhf  (Debian Buster, glibc 2.28)  V4L2 M2M"
-    Write-Host "  arm64    linux-arm64  (Debian Buster, glibc 2.28)  V4L2 M2M, Rockchip MPP, NVENC/NVDEC, Vulkan"
-    Write-Host "  x86_64   linux-x86_64 (Debian Buster, glibc 2.28)  VA-API, NVENC/NVDEC, Vulkan, AMF"
-    Write-Host "  win64    windows-x64  (MinGW-w64 cross)             D3D11VA, DXVA2, NVENC/NVDEC, AMF"
+    Write-Host "Targets (-Arch):"
+    Write-Host "  x64     linux-x86_64 (Debian Buster, glibc 2.28)  VA-API, NVENC/NVDEC, Vulkan, AMF"
+    Write-Host "  arm64   linux-arm64  (Debian Buster, glibc 2.28)  V4L2 M2M, Rockchip MPP, NVENC/NVDEC, Vulkan"
+    Write-Host "  armhf   linux-armhf  (Debian Buster, glibc 2.28)  V4L2 M2M"
+    Write-Host "  win64   windows-x64  (MinGW-w64 cross)             D3D11VA, DXVA2, NVENC/NVDEC, AMF"
+    Write-Host "  both    x64 + arm64"
+    Write-Host "  all     x64 + arm64 + armhf + win64"
     Write-Host ""
     Write-Host "Options:"
-    Write-Host "  -FfmpegVer <ver>       FFmpeg version               (default: 8.1)"
-    Write-Host "  -OutDir    <path>      Output directory             (default: .\dist)"
+    Write-Host "  -FfmpegVer <ver>       FFmpeg version                (default: 8.1)"
+    Write-Host "  -OutDir    <path>      Output directory              (default: .\out)"
     Write-Host "  -Progress  plain|auto  Docker build output verbosity (default: plain)"
     Write-Host "  -NoCache               Force full rebuild (no Docker layer cache)"
     Write-Host ""
-    Write-Host "Outputs:"
-    Write-Host "  Linux:   dist\ffmpeg<ver>-linux-<target>.tar.xz"
-    Write-Host "  win64:   dist\ffmpeg<ver>-windows-x64.7z  (DLLs + ffmpeg.exe only)"
-    Write-Host ""
     Write-Host "Examples:"
-    Write-Host "  .\build.ps1 -Target x86_64"
-    Write-Host "  .\build.ps1 -Target win64"
-    Write-Host "  .\build.ps1 -Target arm64 -FfmpegVer 8.1"
+    Write-Host "  .\build.ps1 -Arch x64"
+    Write-Host "  .\build.ps1 -Arch win64"
+    Write-Host "  .\build.ps1 -Arch all -FfmpegVer 8.1"
     Write-Host ""
     exit 0
 }
 
-if (-not $ImageTag) { $ImageTag = "ffmpeg-${Target}-build" }
-
-if ($Target -eq "win64") {
-    $ArchiveName = "ffmpeg${FfmpegVer}-windows-x64.7z"
-} else {
-    $ArchiveName = "ffmpeg${FfmpegVer}-linux-${Target}.tar.xz"
+# Map Arch param to the Docker TARGET build-arg and output archive name
+function Get-ArchConfig($a) {
+    switch ($a) {
+        "x64"   { @{ Target = "x86_64"; Archive = "ffmpeg${FfmpegVer}-linux-x86_64.tar.xz";  OS = "linux"   } }
+        "arm64" { @{ Target = "arm64";  Archive = "ffmpeg${FfmpegVer}-linux-arm64.tar.xz";   OS = "linux"   } }
+        "armhf" { @{ Target = "armhf";  Archive = "ffmpeg${FfmpegVer}-linux-armhf.tar.xz";   OS = "linux"   } }
+        "win64" { @{ Target = "win64";  Archive = "ffmpeg${FfmpegVer}-windows-x64.7z";        OS = "windows" } }
+    }
 }
-$ArchivePath = Join-Path $OutDir $ArchiveName
 
-# ---------------------------------------------------------------------------
-Write-Host "`n==> Building Docker image: $ImageTag  (target: $Target)" -ForegroundColor Cyan
-# ---------------------------------------------------------------------------
-
-$BuildArgs = @(
-    "build",
-    "--target", "builder",
-    "--progress", $Progress,
-    "--build-arg", "FFMPEG_VER=$FfmpegVer",
-    "--build-arg", "TARGET=$Target",
-    "-t", $ImageTag
-)
-if ($NoCache) { $BuildArgs += "--no-cache" }
-$BuildArgs += "."
-
-$start = Get-Date
-docker @BuildArgs
-if ($LASTEXITCODE -ne 0) { throw "docker build failed (exit $LASTEXITCODE)" }
-
-$elapsed = (Get-Date) - $start
-Write-Host "    Build completed in $([math]::Round($elapsed.TotalMinutes, 1)) min" -ForegroundColor Green
-
-# ---------------------------------------------------------------------------
-Write-Host "`n==> Creating archive: $ArchivePath" -ForegroundColor Cyan
-# ---------------------------------------------------------------------------
+$archList = switch ($Arch) {
+    "both" { @("x64","arm64") }
+    "all"  { @("x64","arm64","armhf","win64") }
+    default { @($Arch) }
+}
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-$OutDir      = (Resolve-Path $OutDir).Path
-$ArchivePath = Join-Path $OutDir $ArchiveName
+$OutDir = (Resolve-Path $OutDir).Path
 
-if ($Target -eq "win64") {
-    # Locate 7-Zip
+# Locate 7-Zip once (needed for win64)
+$7z = $null
+if ($archList -contains "win64") {
     $7z = Get-Command "7z" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
     if (-not $7z) { $7z = "C:\Program Files\7-Zip\7z.exe" }
     if (-not (Test-Path $7z)) { throw "7-Zip not found. Install 7-Zip or add 7z.exe to PATH." }
-
-    # Copy files out of the image via a temporary container, then 7z them.
-    $TempDir = Join-Path $env:TEMP "ffmpeg-win64-$(New-Guid | Select-Object -ExpandProperty Guid)"
-    $ContainerId = (docker create $ImageTag).Trim()
-    try {
-        New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
-        # Copy only bin/ contents (DLLs + ffmpeg.exe); skip lib/, include/, share/
-        docker cp "${ContainerId}:/opt/ffmpeg/bin/." $TempDir
-        if ($LASTEXITCODE -ne 0) { throw "docker cp failed (exit $LASTEXITCODE)" }
-
-        if (Test-Path $ArchivePath) { Remove-Item $ArchivePath }
-        # .lib files are import libs for compile-time linking — not needed for FFmpeg.AutoGen
-        & $7z a -t7z -mx=9 -mmt=on $ArchivePath "$TempDir\*.dll" "$TempDir\ffmpeg.exe"
-        if ($LASTEXITCODE -ne 0) { throw "7z failed (exit $LASTEXITCODE)" }
-    } finally {
-        docker rm $ContainerId | Out-Null
-        Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
-    }
-} else {
-    # Stream tar directly out of the container via raw process stdout.
-    # PowerShell's pipeline corrupts binary on PS 5.1, so we use
-    # System.Diagnostics.Process to read the byte stream directly.
-    $psi = [System.Diagnostics.ProcessStartInfo]::new("docker")
-    $psi.Arguments              = "run --rm $ImageTag tar -cJf - -C /opt/ffmpeg ."
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError  = $true
-    $psi.UseShellExecute        = $false
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    $outFile = [System.IO.File]::OpenWrite($ArchivePath)
-    try   { $proc.StandardOutput.BaseStream.CopyTo($outFile) }
-    finally { $outFile.Close() }
-    $proc.WaitForExit()
-    if ($proc.ExitCode -ne 0) {
-        $err = $proc.StandardError.ReadToEnd()
-        throw "tar extraction failed: $err"
-    }
 }
 
-$size = (Get-Item $ArchivePath).Length / 1MB
-Write-Host "    $ArchivePath  ($([math]::Round($size, 1)) MB)" -ForegroundColor Green
+foreach ($a in $archList) {
+    $cfg         = Get-ArchConfig $a
+    $target      = $cfg.Target
+    $archiveName = $cfg.Archive
+    $archivePath = Join-Path $OutDir $archiveName
+    $tag         = if ($ImageTag) { $ImageTag } else { "ffmpeg-${target}-build" }
 
-# ---------------------------------------------------------------------------
-Write-Host "`n==> Done." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "==> Building $a  (Docker TARGET=$target, image: $tag)" -ForegroundColor Cyan
 
-switch ($Target) {
-    "armhf"  {
-        Write-Host "    Deploy to Pi (32-bit) with:" -ForegroundColor White
-        Write-Host "    scp $ArchivePath pi@<host>:~/"
-        Write-Host "    ssh pi@<host> 'sudo tar -xJf ~/$ArchiveName -C /usr/local && sudo ldconfig'"
+    $buildArgs = @(
+        "build",
+        "--target", "builder",
+        "--progress", $Progress,
+        "--build-arg", "FFMPEG_VER=$FfmpegVer",
+        "--build-arg", "TARGET=$target",
+        "-t", $tag
+    )
+    if ($NoCache) { $buildArgs += "--no-cache" }
+    $buildArgs += "."
+
+    $start = Get-Date
+    docker @buildArgs
+    if ($LASTEXITCODE -ne 0) { throw "docker build failed for $a (exit $LASTEXITCODE)" }
+
+    $elapsed = (Get-Date) - $start
+    Write-Host "    Build completed in $([math]::Round($elapsed.TotalMinutes, 1)) min" -ForegroundColor Green
+
+    Write-Host ""
+    Write-Host "==> Creating archive: $archivePath" -ForegroundColor Cyan
+
+    if ($cfg.OS -eq "windows") {
+        $TempDir     = Join-Path $env:TEMP "ffmpeg-win64-$(New-Guid | Select-Object -ExpandProperty Guid)"
+        $ContainerId = (docker create $tag).Trim()
+        try {
+            New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
+            docker cp "${ContainerId}:/opt/ffmpeg/bin/." $TempDir
+            if ($LASTEXITCODE -ne 0) { throw "docker cp failed (exit $LASTEXITCODE)" }
+
+            if (Test-Path $archivePath) { Remove-Item $archivePath }
+            & $7z a -t7z -mx=9 -mmt=on $archivePath "$TempDir\*.dll" "$TempDir\ffmpeg.exe"
+            if ($LASTEXITCODE -ne 0) { throw "7z failed (exit $LASTEXITCODE)" }
+        } finally {
+            docker rm $ContainerId | Out-Null
+            Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
+        }
+    } else {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new("docker")
+        $psi.Arguments              = "run --rm $tag tar -cJf - -C /opt/ffmpeg ."
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError  = $true
+        $psi.UseShellExecute        = $false
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $outFile = [System.IO.File]::OpenWrite($archivePath)
+        try   { $proc.StandardOutput.BaseStream.CopyTo($outFile) }
+        finally { $outFile.Close() }
+        $proc.WaitForExit()
+        if ($proc.ExitCode -ne 0) {
+            $err = $proc.StandardError.ReadToEnd()
+            throw "tar extraction failed for ${a}: $err"
+        }
     }
-    "arm64"  {
-        Write-Host "    Deploy to Pi (64-bit) / Rockchip / Jetson / aarch64 host with:" -ForegroundColor White
-        Write-Host "    scp $ArchivePath user@<host>:~/"
-        Write-Host "    ssh user@<host> 'sudo tar -xJf ~/$ArchiveName -C /usr/local && sudo ldconfig'"
-        Write-Host "    Note: Rockchip MPP requires rkvdec/mpp_service kernel driver on RK boards" -ForegroundColor Yellow
-    }
-    "x86_64" {
-        Write-Host "    Install on Linux x86_64 with:" -ForegroundColor White
-        Write-Host "    sudo tar -xJf $ArchiveName -C /usr/local && sudo ldconfig"
-    }
-    "win64"  {
-        Write-Host "    Extract $ArchiveName, then:" -ForegroundColor White
-        Write-Host "    Copy bin\*.dll to your application directory (alongside your .exe)"
-        Write-Host "    FFmpeg.AutoGen will find them via PATH or the application directory"
-        Write-Host "    DLLs: avcodec, avformat, avutil, swscale, swresample, avfilter, avdevice" -ForegroundColor Yellow
-    }
+
+    $size = (Get-Item $archivePath).Length / 1MB
+    Write-Host "    $archivePath  ($([math]::Round($size, 1)) MB)" -ForegroundColor Green
 }
+
+Write-Host ""
+Write-Host "==> Done." -ForegroundColor Cyan
 Write-Host ""

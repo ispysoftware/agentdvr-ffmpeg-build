@@ -1,0 +1,16 @@
+# Cloned emgucv source tree (~5-7 GB after build).
+# Recreated on demand by build.ps1 / build-windows.ps1.
+out/
+
+# Docker build cache leftovers (just in case).
+.docker-cache/
+
+# Editor / IDE noise.
+.vscode/
+.vs/
+*.swp
+*.swo
+*~
+
+# Mount-sync diagnostic artifacts.
+.mount_test

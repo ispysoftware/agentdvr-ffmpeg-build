@@ -28,21 +28,24 @@ BUILDING
 --------
 Open PowerShell in this folder and run:
 
-  .\build.ps1                          # armhf (default)
-  .\build.ps1 -Target arm64
-  .\build.ps1 -Target x86_64
+  .\build.ps1                          # prints usage
+  .\build.ps1 -Arch x64
+  .\build.ps1 -Arch arm64
+  .\build.ps1 -Arch win64
+  .\build.ps1 -Arch all
 
-Output lands in the dist\ folder:
+Output lands in the out\ folder:
 
-  dist\ffmpeg8.1-linux-armhf.tar.xz
-  dist\ffmpeg8.1-linux-arm64.tar.xz
-  dist\ffmpeg8.1-linux-x86_64.tar.xz
+  out\ffmpeg8.1-linux-x86_64.tar.xz
+  out\ffmpeg8.1-linux-arm64.tar.xz
+  out\ffmpeg8.1-linux-armhf.tar.xz
+  out\ffmpeg8.1-windows-x64.7z
 
 Build options:
 
-  -Target    armhf | arm64 | x86_64       (default: armhf)
+  -Arch      x64 | arm64 | armhf | win64 | both | all
   -FfmpegVer 8.1                          (default: 8.1)
-  -OutDir    .\dist                        (default: .\dist)
+  -OutDir    .\out                         (default: .\out)
   -NoCache                                 force a clean rebuild, no Docker cache
 
 Examples:
