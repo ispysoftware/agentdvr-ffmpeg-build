@@ -14,3 +14,6 @@ out/
 
 # Mount-sync diagnostic artifacts.
 .mount_test
+
+# Apple notarization credentials — NEVER commit.
+sign_pwd.txt

@@ -55,10 +55,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
 OUT_DIR="${SCRIPT_DIR}/out"
 
 if [ "$TARGET_ARCH" = "arm64" ]; then
-    ARCHIVE="ffmpeg${FFMPEG_VER}-macos-arm64.tar.xz"
+    ARCHIVE="ffmpeg${FFMPEG_VER}-macos-arm64.zip"
     OPENSSL_TARGET=darwin64-arm64-cc
 else
-    ARCHIVE="ffmpeg${FFMPEG_VER}-macos-x86_64.tar.xz"
+    ARCHIVE="ffmpeg${FFMPEG_VER}-macos-x86_64.zip"
     OPENSSL_TARGET=darwin64-x86_64-cc
 fi
 
@@ -465,7 +465,8 @@ done < <(otool -L "${FFBIN}" | awk 'NR>1 {print $1}')
 # ============================================================================
 echo ""
 echo "==> Packaging ${ARCHIVE}..."
-tar -cJf "${OUT_DIR}/${ARCHIVE}" -C "${FFMPEG_PREFIX}" .
+# Only ship bin/ and lib/ — consumers don't need headers or share/
+( cd "${FFMPEG_PREFIX}" && zip -r "${OUT_DIR}/${ARCHIVE}" bin lib )
 SIZE=$(du -sh "${OUT_DIR}/${ARCHIVE}" | cut -f1)
 echo ""
 echo "==> Done: ${OUT_DIR}/${ARCHIVE}  (${SIZE})"
