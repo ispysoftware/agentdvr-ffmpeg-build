@@ -171,10 +171,11 @@ cd "${BUILD_DIR}" && rm -rf libogg-*
 echo "==> libvorbis ${VORBIS_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.xiph.org/releases/vorbis/libvorbis-${VORBIS_VER}.tar.gz" | tar xz
 cd libvorbis-${VORBIS_VER}
-# macOS ships Apple libtool at /usr/bin/libtool (a static linker, not GNU
-# libtool).  Homebrew installs GNU libtool as glibtool.  Tell autoconf to use
-# the right one so the Makefile links and installs the static library correctly.
-LIBTOOL=glibtool LIBTOOLIZE=glibtoolize \
+# The ltmain.sh bundled in the libvorbis 1.3.7 tarball predates modern macOS.
+# autoreconf regenerates it using the Homebrew autotools.  On macOS,
+# /usr/bin/libtool is Apple's static linker (not GNU libtool), so we must
+# point autoreconf at Homebrew's glibtoolize instead.
+LIBTOOLIZE=glibtoolize autoreconf -fiv
 ./configure --prefix=${SYSROOT} --with-ogg=${SYSROOT} \
     --enable-static --disable-shared --disable-oggtest
 make -j${JOBS} && make install
@@ -197,8 +198,8 @@ cd "${BUILD_DIR}" && rm -rf opus-*
 echo "==> libmp3lame ${LAME_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.sourceforge.net/project/lame/lame/${LAME_VER}/lame-${LAME_VER}.tar.gz" | tar xz
 cd lame-${LAME_VER}
-# Same Apple libtool issue as libvorbis — use Homebrew's GNU glibtool.
-LIBTOOL=glibtool LIBTOOLIZE=glibtoolize \
+# Same ltmain.sh vintage issue as libvorbis — regenerate with Homebrew autotools.
+LIBTOOLIZE=glibtoolize autoreconf -fiv
 ./configure --prefix=${SYSROOT} --enable-static --disable-shared \
     --disable-gtktest --disable-analyzer-hooks --disable-decoder --disable-frontend
 make -j${JOBS} && make install
@@ -268,10 +269,15 @@ cd "${BUILD_DIR}" && rm -rf x264-*
 # ============================================================================
 echo ""
 echo "==> Verifying dependency pkg-config files..."
-for pc in libssl vorbis opus mp3lame vpx dav1d x264; do
+# mp3lame is NOT listed here: lame's autotools doesn't reliably install mp3lame.pc
+# on all platforms, and FFmpeg finds it via direct header/library probe instead.
+for pc in libssl vorbis opus vpx dav1d x264; do
     if ! PKG_CONFIG_PATH="${PKG_CONFIG_PATH}" pkg-config --exists "${pc}" 2>/dev/null; then
-        echo "ERROR: ${pc}.pc not found in ${SYSROOT}/lib/pkgconfig — dep build failed"
-        ls "${SYSROOT}/lib/pkgconfig/" 2>/dev/null || echo "(directory does not exist)"
+        echo "ERROR: pkg-config package '${pc}' not found — dep build failed"
+        echo "  lib/pkgconfig:"
+        ls "${SYSROOT}/lib/pkgconfig/" 2>/dev/null || echo "    (directory does not exist)"
+        echo "  share/pkgconfig:"
+        ls "${SYSROOT}/share/pkgconfig/" 2>/dev/null || echo "    (directory does not exist)"
         exit 1
     fi
 done
