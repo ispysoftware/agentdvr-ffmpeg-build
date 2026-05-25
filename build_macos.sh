@@ -171,6 +171,10 @@ cd "${BUILD_DIR}" && rm -rf libogg-*
 echo "==> libvorbis ${VORBIS_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.xiph.org/releases/vorbis/libvorbis-${VORBIS_VER}.tar.gz" | tar xz
 cd libvorbis-${VORBIS_VER}
+# macOS ships Apple libtool at /usr/bin/libtool (a static linker, not GNU
+# libtool).  Homebrew installs GNU libtool as glibtool.  Tell autoconf to use
+# the right one so the Makefile links and installs the static library correctly.
+LIBTOOL=glibtool LIBTOOLIZE=glibtoolize \
 ./configure --prefix=${SYSROOT} --with-ogg=${SYSROOT} \
     --enable-static --disable-shared --disable-oggtest
 make -j${JOBS} && make install
@@ -193,6 +197,8 @@ cd "${BUILD_DIR}" && rm -rf opus-*
 echo "==> libmp3lame ${LAME_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.sourceforge.net/project/lame/lame/${LAME_VER}/lame-${LAME_VER}.tar.gz" | tar xz
 cd lame-${LAME_VER}
+# Same Apple libtool issue as libvorbis — use Homebrew's GNU glibtool.
+LIBTOOL=glibtool LIBTOOLIZE=glibtoolize \
 ./configure --prefix=${SYSROOT} --enable-static --disable-shared \
     --disable-gtktest --disable-analyzer-hooks --disable-decoder --disable-frontend
 make -j${JOBS} && make install
