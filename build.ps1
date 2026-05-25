@@ -112,7 +112,7 @@ foreach ($a in $archList) {
     Write-Host "==> Creating archive: $archivePath" -ForegroundColor Cyan
 
     if ($cfg.OS -eq "windows") {
-        $TempDir     = Join-Path $env:TEMP "ffmpeg-win64-$(New-Guid | Select-Object -ExpandProperty Guid)"
+        $TempDir     = Join-Path ([System.IO.Path]::GetTempPath()) "ffmpeg-win64-$(New-Guid | Select-Object -ExpandProperty Guid)"
         $ContainerId = (docker create $tag).Trim()
         try {
             New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
