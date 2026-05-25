@@ -69,11 +69,23 @@ echo ""
 # 1. Build tools
 # ============================================================================
 echo "==> Installing build tools..."
+# Suppress the auto-update that fires on every brew call in CI — it's slow and
+# can fail independently of what we're actually trying to install.
+export HOMEBREW_NO_AUTO_UPDATE=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1
 brew install nasm cmake meson ninja pkg-config automake autoconf libtool yasm
 
 # ============================================================================
 # 2. Build environment
 # ============================================================================
+# Pin the deployment target so FFmpeg's configure doesn't raise
+# -Werror=partial-availability against SDK APIs newer than our floor.
+if [ "$ARCH" = "arm64" ]; then
+    export MACOSX_DEPLOYMENT_TARGET=11.0   # first Apple Silicon release
+else
+    export MACOSX_DEPLOYMENT_TARGET=10.15  # Catalina — reasonable x86_64 floor
+fi
+
 export CC=clang
 export CXX=clang++
 export AR=ar
@@ -99,7 +111,7 @@ cd "${BUILD_DIR}"
 # zlib
 # ---------------------------------------------------------------------------
 echo "==> zlib ${ZLIB_VER}"
-curl -fsSL "https://github.com/madler/zlib/releases/download/v${ZLIB_VER}/zlib-${ZLIB_VER}.tar.gz" | tar xz
+curl -fsSL --retry 3 --retry-delay 5 "https://github.com/madler/zlib/releases/download/v${ZLIB_VER}/zlib-${ZLIB_VER}.tar.gz" | tar xz
 cd zlib-${ZLIB_VER}
 CC=${CC} CFLAGS="${CFLAGS}" ./configure --prefix=${SYSROOT} --static
 make -j${JOBS} && make install
@@ -109,7 +121,7 @@ cd "${BUILD_DIR}" && rm -rf zlib-*
 # bzip2
 # ---------------------------------------------------------------------------
 echo "==> bzip2 ${BZIP2_VER}"
-curl -fsSL "https://sourceware.org/pub/bzip2/bzip2-${BZIP2_VER}.tar.gz" | tar xz
+curl -fsSL --retry 3 --retry-delay 5 "https://sourceware.org/pub/bzip2/bzip2-${BZIP2_VER}.tar.gz" | tar xz
 cd bzip2-${BZIP2_VER}
 make -j${JOBS} \
     CC="${CC}" CFLAGS="${CFLAGS} -Wall -Winline -D_FILE_OFFSET_BITS=64" \
@@ -124,7 +136,7 @@ cd "${BUILD_DIR}" && rm -rf bzip2-*
 # xz / liblzma
 # ---------------------------------------------------------------------------
 echo "==> xz ${XZ_VER}"
-curl -fsSL "https://github.com/tukaani-project/xz/releases/download/v${XZ_VER}/xz-${XZ_VER}.tar.gz" | tar xz
+curl -fsSL --retry 3 --retry-delay 5 "https://github.com/tukaani-project/xz/releases/download/v${XZ_VER}/xz-${XZ_VER}.tar.gz" | tar xz
 cd xz-${XZ_VER}
 ./configure --prefix=${SYSROOT} --enable-static --disable-shared --disable-doc \
     --disable-lzmadec --disable-lzmainfo --disable-scripts
@@ -135,7 +147,7 @@ cd "${BUILD_DIR}" && rm -rf xz-*
 # OpenSSL 3  (https / rtmps)
 # ---------------------------------------------------------------------------
 echo "==> OpenSSL ${OPENSSL_VER}"
-curl -fsSL "https://www.openssl.org/source/openssl-${OPENSSL_VER}.tar.gz" | tar xz
+curl -fsSL --retry 3 --retry-delay 5 "https://www.openssl.org/source/openssl-${OPENSSL_VER}.tar.gz" | tar xz
 cd openssl-${OPENSSL_VER}
 ./Configure ${OPENSSL_TARGET} \
     --prefix=${SYSROOT} --openssldir=${SYSROOT}/ssl \
@@ -147,7 +159,7 @@ cd "${BUILD_DIR}" && rm -rf openssl-*
 # libogg
 # ---------------------------------------------------------------------------
 echo "==> libogg ${OGG_VER}"
-curl -fsSL "https://downloads.xiph.org/releases/ogg/libogg-${OGG_VER}.tar.gz" | tar xz
+curl -fsSL --retry 3 --retry-delay 5 "https://downloads.xiph.org/releases/ogg/libogg-${OGG_VER}.tar.gz" | tar xz
 cd libogg-${OGG_VER}
 ./configure --prefix=${SYSROOT} --enable-static --disable-shared
 make -j${JOBS} && make install
@@ -157,7 +169,7 @@ cd "${BUILD_DIR}" && rm -rf libogg-*
 # libvorbis
 # ---------------------------------------------------------------------------
 echo "==> libvorbis ${VORBIS_VER}"
-curl -fsSL "https://downloads.xiph.org/releases/vorbis/libvorbis-${VORBIS_VER}.tar.gz" | tar xz
+curl -fsSL --retry 3 --retry-delay 5 "https://downloads.xiph.org/releases/vorbis/libvorbis-${VORBIS_VER}.tar.gz" | tar xz
 cd libvorbis-${VORBIS_VER}
 ./configure --prefix=${SYSROOT} --with-ogg=${SYSROOT} \
     --enable-static --disable-shared --disable-oggtest
@@ -168,7 +180,7 @@ cd "${BUILD_DIR}" && rm -rf libvorbis-*
 # Opus
 # ---------------------------------------------------------------------------
 echo "==> Opus ${OPUS_VER}"
-curl -fsSL "https://downloads.xiph.org/releases/opus/opus-${OPUS_VER}.tar.gz" | tar xz
+curl -fsSL --retry 3 --retry-delay 5 "https://downloads.xiph.org/releases/opus/opus-${OPUS_VER}.tar.gz" | tar xz
 cd opus-${OPUS_VER}
 ./configure --prefix=${SYSROOT} --enable-static --disable-shared \
     --disable-doc --disable-extra-programs
@@ -179,7 +191,7 @@ cd "${BUILD_DIR}" && rm -rf opus-*
 # libmp3lame
 # ---------------------------------------------------------------------------
 echo "==> libmp3lame ${LAME_VER}"
-curl -fsSL "https://downloads.sourceforge.net/project/lame/lame/${LAME_VER}/lame-${LAME_VER}.tar.gz" | tar xz
+curl -fsSL --retry 3 --retry-delay 5 "https://downloads.sourceforge.net/project/lame/lame/${LAME_VER}/lame-${LAME_VER}.tar.gz" | tar xz
 cd lame-${LAME_VER}
 ./configure --prefix=${SYSROOT} --enable-static --disable-shared \
     --disable-gtktest --disable-analyzer-hooks --disable-decoder --disable-frontend
@@ -191,16 +203,21 @@ cd "${BUILD_DIR}" && rm -rf lame-*
 # nasm is used for x86_64 asm; on arm64 the integrated assembler handles it.
 # ---------------------------------------------------------------------------
 echo "==> libvpx ${VPX_VER}"
-curl -fsSL "https://github.com/webmproject/libvpx/archive/v${VPX_VER}.tar.gz" \
+curl -fsSL --retry 3 --retry-delay 5 "https://github.com/webmproject/libvpx/archive/v${VPX_VER}.tar.gz" \
     -o libvpx-${VPX_VER}.tar.gz
 tar xf libvpx-${VPX_VER}.tar.gz && cd libvpx-${VPX_VER}
-VPX_AS_FLAG=""
-if [ "$ARCH" = "x86_64" ]; then VPX_AS_FLAG="--as=nasm"; fi
+if [ "$ARCH" = "arm64" ]; then
+    VPX_TARGET="arm64-darwin-gcc"
+else
+    VPX_TARGET="x86_64-darwin20-gcc"
+    VPX_AS_EXTRA="--as=nasm"
+fi
 ./configure --prefix=${SYSROOT} \
+    --target=${VPX_TARGET} \
     --enable-static --disable-shared \
     --disable-examples --disable-tools --disable-docs --disable-unit-tests \
     --enable-vp8 --enable-vp9 --enable-runtime-cpu-detect \
-    ${VPX_AS_FLAG}
+    ${VPX_AS_EXTRA:-}
 make -j${JOBS} && make install
 cd "${BUILD_DIR}" && rm -rf libvpx-*
 
@@ -208,7 +225,7 @@ cd "${BUILD_DIR}" && rm -rf libvpx-*
 # dav1d  (AV1 decoder)
 # ---------------------------------------------------------------------------
 echo "==> dav1d ${DAV1D_VER}"
-curl -fsSL "https://github.com/videolan/dav1d/archive/refs/tags/${DAV1D_VER}.tar.gz" \
+curl -fsSL --retry 3 --retry-delay 5 "https://github.com/videolan/dav1d/archive/refs/tags/${DAV1D_VER}.tar.gz" \
     -o dav1d-${DAV1D_VER}.tar.gz
 tar xf dav1d-${DAV1D_VER}.tar.gz && cd dav1d-${DAV1D_VER}
 meson setup _build \
@@ -221,23 +238,43 @@ cd "${BUILD_DIR}" && rm -rf dav1d-*
 # libx264  (GPL 2+)
 # ---------------------------------------------------------------------------
 echo "==> libx264 (${X264_VER})"
-curl -fsSL \
+curl -fsSL --retry 3 --retry-delay 5 \
     "https://code.videolan.org/videolan/x264/-/archive/${X264_VER}/x264-${X264_VER}.tar.gz" \
     | tar xz
 cd x264-*/
-X264_AS_FLAG=""
-if [ "$ARCH" = "x86_64" ]; then X264_AS_FLAG="AS=nasm"; fi
-${X264_AS_FLAG} ./configure --prefix=${SYSROOT} \
-    --enable-static --disable-cli --disable-opencl --enable-pic
+if [ "$ARCH" = "x86_64" ]; then
+    ./configure --prefix=${SYSROOT} \
+        --enable-static --disable-cli --disable-opencl --enable-pic \
+        AS=nasm
+else
+    ./configure --prefix=${SYSROOT} \
+        --enable-static --disable-cli --disable-opencl --enable-pic
+fi
 make -j${JOBS} && make install
 cd "${BUILD_DIR}" && rm -rf x264-*
 
 # ============================================================================
 # 4. FFmpeg  —  GPL · shared libraries (.dylib)
 # ============================================================================
+# ============================================================================
+# Sanity-check: verify all dep .pc files are in place before FFmpeg configure.
+# A missing file here means a dep build failed silently despite set -e.
+# ============================================================================
+echo ""
+echo "==> Verifying dependency pkg-config files..."
+for pc in libssl vorbis opus mp3lame vpx dav1d x264; do
+    if ! PKG_CONFIG_PATH="${PKG_CONFIG_PATH}" pkg-config --exists "${pc}" 2>/dev/null; then
+        echo "ERROR: ${pc}.pc not found in ${SYSROOT}/lib/pkgconfig — dep build failed"
+        ls "${SYSROOT}/lib/pkgconfig/" 2>/dev/null || echo "(directory does not exist)"
+        exit 1
+    fi
+done
+echo "    All deps present."
+
+# ============================================================================
 echo ""
 echo "==> FFmpeg ${FFMPEG_VER}"
-curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER}.tar.xz" | tar xJ
+curl -fsSL --retry 3 --retry-delay 5 "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER}.tar.xz" | tar xJ
 cd ffmpeg-${FFMPEG_VER}
 
 ./configure \
