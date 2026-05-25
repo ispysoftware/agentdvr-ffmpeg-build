@@ -78,7 +78,7 @@ echo "==> Installing build tools..."
 # can fail independently of what we're actually trying to install.
 export HOMEBREW_NO_AUTO_UPDATE=1
 export HOMEBREW_NO_INSTALL_CLEANUP=1
-brew install nasm cmake meson ninja pkg-config automake autoconf libtool yasm
+brew install --quiet nasm cmake meson ninja pkg-config automake autoconf libtool yasm
 
 # ============================================================================
 # 2. Build environment
@@ -466,7 +466,7 @@ done < <(otool -L "${FFBIN}" | awk 'NR>1 {print $1}')
 echo ""
 echo "==> Packaging ${ARCHIVE}..."
 # Only ship bin/ and lib/ — consumers don't need headers or share/
-( cd "${FFMPEG_PREFIX}" && zip -r "${OUT_DIR}/${ARCHIVE}" bin lib )
+( cd "${FFMPEG_PREFIX}" && zip -r -y "${OUT_DIR}/${ARCHIVE}" bin lib )
 SIZE=$(du -sh "${OUT_DIR}/${ARCHIVE}" | cut -f1)
 echo ""
 echo "==> Done: ${OUT_DIR}/${ARCHIVE}  (${SIZE})"

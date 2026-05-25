@@ -128,7 +128,7 @@ foreach ($a in $archList) {
         }
     } else {
         $psi = [System.Diagnostics.ProcessStartInfo]::new("docker")
-        $psi.Arguments              = "run --rm $tag tar -cJf - -C /opt/ffmpeg ."
+        $psi.Arguments              = "run --rm $tag tar -cJf - -C /opt/ffmpeg bin lib"
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError  = $true
         $psi.UseShellExecute        = $false

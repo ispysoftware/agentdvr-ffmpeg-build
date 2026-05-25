@@ -112,7 +112,7 @@ for INPUT_ZIP in "${ZIPS[@]}"; do
     # --- Repack ---
     SIGNED_ZIP="${OUT_DIR}/${BASENAME}-notarized.zip"
     echo "📦 Repacking → $(basename "${SIGNED_ZIP}")..."
-    (cd "${WORK_DIR}" && zip -r -q -X "${SIGNED_ZIP}" bin lib -x "*.DS_Store")
+    (cd "${WORK_DIR}" && zip -r -y -q -X "${SIGNED_ZIP}" bin lib -x "*.DS_Store")
 
     rm -rf "${WORK_DIR}"
     trap - EXIT
