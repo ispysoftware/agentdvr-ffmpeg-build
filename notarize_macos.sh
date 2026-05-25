@@ -21,11 +21,18 @@
 set -e
 
 # --- Configuration ---
-DEVELOPER_ID="Developer ID Application: THE PLAYFUL GROUP PTY LTD (5A2A6Q9QVJ)"
-APPLE_ID="sean@ispyconnect.com"
-TEAM_ID="5A2A6Q9QVJ"
-
 SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
+
+# Credentials are kept outside the repo in notarize_config.sh (gitignored).
+# Copy notarize_config.sh.example to notarize_config.sh and fill it in.
+CONFIG_FILE="${SCRIPT_DIR}/notarize_config.sh"
+if [ ! -f "${CONFIG_FILE}" ]; then
+    echo "ERROR: ${CONFIG_FILE} not found."
+    echo "Copy notarize_config.sh.example to notarize_config.sh and fill in your credentials."
+    exit 1
+fi
+# shellcheck source=notarize_config.sh.example
+source "${CONFIG_FILE}"
 
 # App-specific password — read from sign_pwd.txt, never hardcoded.
 SIGN_PWD_FILE="${SCRIPT_DIR}/sign_pwd.txt"

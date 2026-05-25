@@ -17,3 +17,4 @@ out/
 
 # Apple notarization credentials — NEVER commit.
 sign_pwd.txt
+notarize_config.sh

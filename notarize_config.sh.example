@@ -1,0 +1,5 @@
+# Copy this file to notarize_config.sh and fill in your details.
+# notarize_config.sh is gitignored and must never be committed.
+DEVELOPER_ID="Developer ID Application: YOUR NAME (TEAMID)"
+APPLE_ID="you@example.com"
+TEAM_ID="XXXXXXXXXX"
