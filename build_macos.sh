@@ -171,14 +171,14 @@ cd "${BUILD_DIR}" && rm -rf libogg-*
 echo "==> libvorbis ${VORBIS_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.xiph.org/releases/vorbis/libvorbis-${VORBIS_VER}.tar.gz" | tar xz
 cd libvorbis-${VORBIS_VER}
-# The ltmain.sh bundled in the libvorbis 1.3.7 tarball predates modern macOS.
-# autoreconf regenerates it using the Homebrew autotools.  On macOS,
-# /usr/bin/libtool is Apple's static linker (not GNU libtool), so we must
-# point autoreconf at Homebrew's glibtoolize instead.
 LIBTOOLIZE=glibtoolize autoreconf -fiv
+# -force_cpusubtype_ALL was removed in Xcode 16; strip it from the generated
+# ltmain.sh before ./configure bakes it into the ./libtool helper script.
+sed -i '' 's/ -force_cpusubtype_ALL//g' ltmain.sh
 ./configure --prefix=${SYSROOT} --with-ogg=${SYSROOT} \
     --enable-static --disable-shared --disable-oggtest
-make -j${JOBS} && make install
+make -j${JOBS}
+make install
 cd "${BUILD_DIR}" && rm -rf libvorbis-*
 
 # ---------------------------------------------------------------------------
@@ -198,8 +198,10 @@ cd "${BUILD_DIR}" && rm -rf opus-*
 echo "==> libmp3lame ${LAME_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.sourceforge.net/project/lame/lame/${LAME_VER}/lame-${LAME_VER}.tar.gz" | tar xz
 cd lame-${LAME_VER}
-# Same ltmain.sh vintage issue as libvorbis — regenerate with Homebrew autotools.
+# Same ltmain.sh vintage issue as libvorbis — regenerate with Homebrew autotools,
+# then strip the -force_cpusubtype_ALL flag removed in Xcode 16.
 LIBTOOLIZE=glibtoolize autoreconf -fiv
+sed -i '' 's/ -force_cpusubtype_ALL//g' ltmain.sh
 ./configure --prefix=${SYSROOT} --enable-static --disable-shared \
     --disable-gtktest --disable-analyzer-hooks --disable-decoder --disable-frontend
 make -j${JOBS} && make install
