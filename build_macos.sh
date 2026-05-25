@@ -172,9 +172,10 @@ echo "==> libvorbis ${VORBIS_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.xiph.org/releases/vorbis/libvorbis-${VORBIS_VER}.tar.gz" | tar xz
 cd libvorbis-${VORBIS_VER}
 LIBTOOLIZE=glibtoolize autoreconf -fiv
-# -force_cpusubtype_ALL was removed in Xcode 16; strip it from the generated
-# ltmain.sh before ./configure bakes it into the ./libtool helper script.
-sed -i '' 's/ -force_cpusubtype_ALL//g' ltmain.sh
+# Xcode 16 dropped -force_cpusubtype_ALL from ld.  The flag appears in both
+# ltmain.sh and the generated configure script (via m4/libtool.m4), so patch
+# every file that contains it before ./configure bakes them into ./libtool.
+grep -rl 'force_cpusubtype_ALL' . | xargs sed -i '' 's/ -force_cpusubtype_ALL//g'
 ./configure --prefix=${SYSROOT} --with-ogg=${SYSROOT} \
     --enable-static --disable-shared --disable-oggtest
 make -j${JOBS}
@@ -198,10 +199,9 @@ cd "${BUILD_DIR}" && rm -rf opus-*
 echo "==> libmp3lame ${LAME_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.sourceforge.net/project/lame/lame/${LAME_VER}/lame-${LAME_VER}.tar.gz" | tar xz
 cd lame-${LAME_VER}
-# Same ltmain.sh vintage issue as libvorbis — regenerate with Homebrew autotools,
-# then strip the -force_cpusubtype_ALL flag removed in Xcode 16.
+# Same ltmain.sh/configure issue as libvorbis — regenerate then patch all files.
 LIBTOOLIZE=glibtoolize autoreconf -fiv
-sed -i '' 's/ -force_cpusubtype_ALL//g' ltmain.sh
+grep -rl 'force_cpusubtype_ALL' . | xargs sed -i '' 's/ -force_cpusubtype_ALL//g'
 ./configure --prefix=${SYSROOT} --enable-static --disable-shared \
     --disable-gtktest --disable-analyzer-hooks --disable-decoder --disable-frontend
 make -j${JOBS} && make install
