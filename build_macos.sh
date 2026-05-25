@@ -353,6 +353,7 @@ cd ffmpeg-${FFMPEG_VER}
     --pkg-config-flags="--static" \
     \
     --arch=${TARGET_ARCH} \
+    $( [ "${TARGET_ARCH}" != "${ARCH}" ] && echo "--enable-cross-compile" ) \
     --extra-cflags="${CFLAGS} -I${SYSROOT}/include" \
     --extra-ldflags="-L${SYSROOT}/lib" \
     --extra-libs="-lpthread -lm" \
