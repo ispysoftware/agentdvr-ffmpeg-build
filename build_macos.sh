@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-# build_macos.sh — Build FFmpeg from source on macOS (arm64 or x86_64)
+# build_macos.sh — Build FFmpeg from source on macOS
 #
-# Runs natively on the target arch — no cross-compilation, no Rosetta.
+# Runs natively on arm64 (Apple Silicon).  Can also cross-compile for x86_64
+# by setting TARGET_ARCH=x86_64 — used in CI so both architectures can be
+# built on a single macos-latest (arm64) runner.
+#
 # Mirrors the Dockerfile: all codec deps built statically, baked into the
 # FFmpeg .dylib files.  Nothing extra to deploy alongside them.
 #
@@ -10,13 +13,14 @@
 # always available — no driver install required on the target machine).
 #
 # Usage:
-#   ./build_macos.sh                    # uses FFMPEG_VER default (8.1)
+#   ./build_macos.sh                              # native arch, FFmpeg 8.1
 #   FFMPEG_VER=8.1 ./build_macos.sh
+#   TARGET_ARCH=x86_64 ./build_macos.sh           # cross-compile for x86_64
 #   FFMPEG_VER=8.1 JOBS=8 ./build_macos.sh
 #
 # Output:
-#   out/ffmpeg<ver>-macos-arm64.tar.xz    (on Apple Silicon)
-#   out/ffmpeg<ver>-macos-x86_64.tar.xz  (on Intel)
+#   out/ffmpeg<ver>-macos-arm64.tar.xz
+#   out/ffmpeg<ver>-macos-x86_64.tar.xz
 # =============================================================================
 
 set -euo pipefail
@@ -40,16 +44,17 @@ X264_VER=stable
 # ============================================================================
 # Paths
 # ============================================================================
-ARCH=$(uname -m)                        # arm64 or x86_64
+ARCH=$(uname -m)                              # native machine arch: arm64 or x86_64
+TARGET_ARCH=${TARGET_ARCH:-${ARCH}}           # compile target (may differ for cross-builds)
 JOBS=${JOBS:-$(sysctl -n hw.logicalcpu)}
 
-SYSROOT=/tmp/ffmpeg-deps-${ARCH}        # static deps install prefix
-FFMPEG_PREFIX=/tmp/ffmpeg-out-${ARCH}   # FFmpeg install prefix
-BUILD_DIR=/tmp/ffmpeg-build-${ARCH}     # scratch build space
+SYSROOT=/tmp/ffmpeg-deps-${TARGET_ARCH}       # static deps install prefix
+FFMPEG_PREFIX=/tmp/ffmpeg-out-${TARGET_ARCH}  # FFmpeg install prefix
+BUILD_DIR=/tmp/ffmpeg-build-${TARGET_ARCH}    # scratch build space
 SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
 OUT_DIR="${SCRIPT_DIR}/out"
 
-if [ "$ARCH" = "arm64" ]; then
+if [ "$TARGET_ARCH" = "arm64" ]; then
     ARCHIVE="ffmpeg${FFMPEG_VER}-macos-arm64.tar.xz"
     OPENSSL_TARGET=darwin64-arm64-cc
 else
@@ -58,7 +63,7 @@ else
 fi
 
 echo ""
-echo "==> FFmpeg ${FFMPEG_VER} — macOS ${ARCH}"
+echo "==> FFmpeg ${FFMPEG_VER} — macOS ${TARGET_ARCH}  (host: ${ARCH})"
 echo "    sysroot:        ${SYSROOT}"
 echo "    ffmpeg prefix:  ${FFMPEG_PREFIX}"
 echo "    output:         ${OUT_DIR}/${ARCHIVE}"
@@ -80,14 +85,25 @@ brew install nasm cmake meson ninja pkg-config automake autoconf libtool yasm
 # ============================================================================
 # Pin the deployment target so FFmpeg's configure doesn't raise
 # -Werror=partial-availability against SDK APIs newer than our floor.
-if [ "$ARCH" = "arm64" ]; then
+if [ "$TARGET_ARCH" = "arm64" ]; then
     export MACOSX_DEPLOYMENT_TARGET=11.0   # first Apple Silicon release
 else
     export MACOSX_DEPLOYMENT_TARGET=10.15  # Catalina — reasonable x86_64 floor
 fi
 
-export CC=clang
-export CXX=clang++
+# When cross-compiling (TARGET_ARCH != ARCH), embed -arch in CC/CXX so every
+# compiler invocation targets the right architecture.  Autotools packages also
+# need --host to suppress "cross-compiling" warnings and select correct paths.
+if [ "${TARGET_ARCH}" != "${ARCH}" ]; then
+    export CC="clang -arch ${TARGET_ARCH}"
+    export CXX="clang++ -arch ${TARGET_ARCH}"
+    HOST_FLAG="--host=${TARGET_ARCH}-apple-darwin"
+else
+    export CC=clang
+    export CXX=clang++
+    HOST_FLAG=""
+fi
+
 export AR=ar
 export RANLIB=ranlib
 export STRIP=strip
@@ -139,7 +155,8 @@ echo "==> xz ${XZ_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://github.com/tukaani-project/xz/releases/download/v${XZ_VER}/xz-${XZ_VER}.tar.gz" | tar xz
 cd xz-${XZ_VER}
 ./configure --prefix=${SYSROOT} --enable-static --disable-shared --disable-doc \
-    --disable-lzmadec --disable-lzmainfo --disable-scripts
+    --disable-lzmadec --disable-lzmainfo --disable-scripts \
+    ${HOST_FLAG}
 make -j${JOBS} && make install
 cd "${BUILD_DIR}" && rm -rf xz-*
 
@@ -161,7 +178,8 @@ cd "${BUILD_DIR}" && rm -rf openssl-*
 echo "==> libogg ${OGG_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.xiph.org/releases/ogg/libogg-${OGG_VER}.tar.gz" | tar xz
 cd libogg-${OGG_VER}
-./configure --prefix=${SYSROOT} --enable-static --disable-shared
+./configure --prefix=${SYSROOT} --enable-static --disable-shared \
+    ${HOST_FLAG}
 make -j${JOBS} && make install
 cd "${BUILD_DIR}" && rm -rf libogg-*
 
@@ -172,11 +190,12 @@ echo "==> libvorbis ${VORBIS_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.xiph.org/releases/vorbis/libvorbis-${VORBIS_VER}.tar.gz" | tar xz
 cd libvorbis-${VORBIS_VER}
 # -force_cpusubtype_ALL is a PowerPC-era linker flag removed in Xcode 15+.
-# It is set in libvorbis's configure script in the darwin host section.
-# Patch the bundled configure script before running it (no autoreconf needed).
+# It is hardcoded in libvorbis's bundled configure script for Darwin targets.
+# Patch it out before running configure (no autoreconf needed).
 sed -i '' 's/-force_cpusubtype_ALL//g' configure
 ./configure --prefix=${SYSROOT} --with-ogg=${SYSROOT} \
-    --enable-static --disable-shared --disable-oggtest
+    --enable-static --disable-shared --disable-oggtest \
+    ${HOST_FLAG}
 make -j${JOBS}
 make install
 cd "${BUILD_DIR}" && rm -rf libvorbis-*
@@ -188,7 +207,8 @@ echo "==> Opus ${OPUS_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.xiph.org/releases/opus/opus-${OPUS_VER}.tar.gz" | tar xz
 cd opus-${OPUS_VER}
 ./configure --prefix=${SYSROOT} --enable-static --disable-shared \
-    --disable-doc --disable-extra-programs
+    --disable-doc --disable-extra-programs \
+    ${HOST_FLAG}
 make -j${JOBS} && make install
 cd "${BUILD_DIR}" && rm -rf opus-*
 
@@ -198,10 +218,11 @@ cd "${BUILD_DIR}" && rm -rf opus-*
 echo "==> libmp3lame ${LAME_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://downloads.sourceforge.net/project/lame/lame/${LAME_VER}/lame-${LAME_VER}.tar.gz" | tar xz
 cd lame-${LAME_VER}
-# Same flag issue as libvorbis — patch the bundled configure script before running.
+# Same -force_cpusubtype_ALL issue as libvorbis — patch the bundled configure.
 sed -i '' 's/-force_cpusubtype_ALL//g' configure
 ./configure --prefix=${SYSROOT} --enable-static --disable-shared \
-    --disable-gtktest --disable-analyzer-hooks --disable-decoder --disable-frontend
+    --disable-gtktest --disable-analyzer-hooks --disable-decoder --disable-frontend \
+    ${HOST_FLAG}
 make -j${JOBS} && make install
 cd "${BUILD_DIR}" && rm -rf lame-*
 
@@ -215,10 +236,10 @@ curl -fsSL --retry 3 --retry-delay 5 "https://github.com/webmproject/libvpx/arch
 tar xf libvpx-${VPX_VER}.tar.gz && cd libvpx-${VPX_VER}
 # Derive the darwin kernel major version and cap at the highest target that
 # libvpx 1.14.1 knows about (darwin23 = macOS 14).  The generic
-# "arm64-darwin-gcc" target is iOS — the numbered ones are macOS.
+# "arm64-darwin-gcc" target is the iOS target — the numbered ones are macOS.
 DARWIN_MAJOR=$(uname -r | cut -d. -f1)
 [ "${DARWIN_MAJOR}" -gt 23 ] && DARWIN_MAJOR=23
-if [ "$ARCH" = "arm64" ]; then
+if [ "$TARGET_ARCH" = "arm64" ]; then
     VPX_TARGET="arm64-darwin${DARWIN_MAJOR}-gcc"
 else
     VPX_TARGET="x86_64-darwin${DARWIN_MAJOR}-gcc"
@@ -240,9 +261,38 @@ echo "==> dav1d ${DAV1D_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://github.com/videolan/dav1d/archive/refs/tags/${DAV1D_VER}.tar.gz" \
     -o dav1d-${DAV1D_VER}.tar.gz
 tar xf dav1d-${DAV1D_VER}.tar.gz && cd dav1d-${DAV1D_VER}
-meson setup _build \
-    --prefix=${SYSROOT} --default-library=static --buildtype=release \
-    -Denable_tools=false -Denable_tests=false
+if [ "${TARGET_ARCH}" != "${ARCH}" ]; then
+    # Meson needs a cross-file to know we're targeting a different architecture.
+    DAV1D_CROSS="${BUILD_DIR}/dav1d-cross.ini"
+    if [ "${TARGET_ARCH}" = "arm64" ]; then
+        DAV1D_CPU_FAMILY="aarch64"
+    else
+        DAV1D_CPU_FAMILY="x86_64"
+    fi
+    cat > "${DAV1D_CROSS}" << EOF
+[binaries]
+c = 'clang'
+cpp = 'clang++'
+[properties]
+c_args = ['-arch', '${TARGET_ARCH}']
+cpp_args = ['-arch', '${TARGET_ARCH}']
+c_link_args = ['-arch', '${TARGET_ARCH}']
+cpp_link_args = ['-arch', '${TARGET_ARCH}']
+[host_machine]
+system = 'darwin'
+cpu_family = '${DAV1D_CPU_FAMILY}'
+cpu = '${TARGET_ARCH}'
+endian = 'little'
+EOF
+    meson setup _build \
+        --prefix=${SYSROOT} --default-library=static --buildtype=release \
+        --cross-file "${DAV1D_CROSS}" \
+        -Denable_tools=false -Denable_tests=false
+else
+    meson setup _build \
+        --prefix=${SYSROOT} --default-library=static --buildtype=release \
+        -Denable_tools=false -Denable_tests=false
+fi
 ninja -C _build -j${JOBS} && ninja -C _build install
 cd "${BUILD_DIR}" && rm -rf dav1d-*
 
@@ -254,13 +304,15 @@ curl -fsSL --retry 3 --retry-delay 5 \
     "https://code.videolan.org/videolan/x264/-/archive/${X264_VER}/x264-${X264_VER}.tar.gz" \
     | tar xz
 cd x264-*/
-if [ "$ARCH" = "x86_64" ]; then
+if [ "$TARGET_ARCH" = "x86_64" ]; then
     ./configure --prefix=${SYSROOT} \
         --enable-static --disable-cli --disable-opencl --enable-pic \
+        ${HOST_FLAG} \
         AS=nasm
 else
     ./configure --prefix=${SYSROOT} \
-        --enable-static --disable-cli --disable-opencl --enable-pic
+        --enable-static --disable-cli --disable-opencl --enable-pic \
+        ${HOST_FLAG}
 fi
 make -j${JOBS} && make install
 cd "${BUILD_DIR}" && rm -rf x264-*
@@ -300,6 +352,7 @@ cd ffmpeg-${FFMPEG_VER}
     --pkg-config=${PKG_CONFIG} \
     --pkg-config-flags="--static" \
     \
+    --arch=${TARGET_ARCH} \
     --extra-cflags="${CFLAGS} -I${SYSROOT}/include" \
     --extra-ldflags="-L${SYSROOT}/lib" \
     --extra-libs="-lpthread -lm" \
