@@ -669,6 +669,7 @@ RUN . /env.sh && set -eux \
  && if [ "$IS_CROSS" = "1" ]; then \
       CROSS_COMPILE_FLAGS="--cross-prefix=${TARGET_TRIPLE}- --enable-cross-compile --target-os=${FF_OS}"; \
     fi \
+ \
  # RUNPATH=$ORIGIN so each FFmpeg .so resolves its co-located siblings AND bundled
  # deps (e.g. librockchip_mpp.so.1 on arm64) from its own directory, without relying
  # on LD_LIBRARY_PATH or the loader's load order. $$ORIGIN survives make's variable
@@ -803,11 +804,12 @@ int  snd_device_name_hint(int c, const char *iface, void ***hints) { *hints = NU
 char *snd_device_name_get_hint(const void *hint, const char *id) { return NULL; }
 int  snd_device_name_free_hint(void **hints) { return 0; }
 STUB_EOF
+ \
+ # -soname libasound.so.2 is REQUIRED: the C# loader dlopen()s this stub with RTLD_GLOBAL
+ # and the dynamic linker only satisfies libavdevice's NEEDED libasound.so.2 from an
+ # already-loaded object whose DT_SONAME matches. Without -soname the preload is a no-op.
+ # Linux ELF only — ALSA is not used on the win64/mingw target.
  && if [ "$FF_OS" = "linux" ]; then \
-      # -soname libasound.so.2 is REQUIRED. The C# loader dlopen()s this stub with
-      # RTLD_GLOBAL, and the dynamic linker only satisfies libavdevice's NEEDED
-      # libasound.so.2 from an already-loaded object whose DT_SONAME matches. Without
-      # -soname no SONAME is written, the names don't match, and the preload is a no-op.
       ${CC} -shared -fPIC -Wl,-soname,libasound.so.2 \
             -o ${FFMPEG_PREFIX}/lib/libasound_stub.so.2 /tmp/alsa_stub.c; \
     fi \
