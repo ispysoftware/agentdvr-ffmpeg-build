@@ -141,6 +141,8 @@ RUN dpkg --add-architecture armhf \
       patch \
       texinfo \
       gettext \
+      # patchelf — used to stamp RUNPATH=$ORIGIN onto the output .so files
+      patchelf \
  && rm -rf /var/lib/apt/lists/* \
  && pip3 install --upgrade pip \
  && pip3 install meson ninja
@@ -670,12 +672,6 @@ RUN . /env.sh && set -eux \
       CROSS_COMPILE_FLAGS="--cross-prefix=${TARGET_TRIPLE}- --enable-cross-compile --target-os=${FF_OS}"; \
     fi \
  \
- # RUNPATH=$ORIGIN so each FFmpeg .so resolves its co-located siblings AND bundled
- # deps (e.g. librockchip_mpp.so.1 on arm64) from its own directory, without relying
- # on LD_LIBRARY_PATH or the loader's load order. $$ORIGIN survives make's variable
- # expansion to emit a literal $ORIGIN. Linux ELF only (meaningless for win64 DLLs).
- && FF_RPATH="" \
- && if [ "$FF_OS" = "linux" ]; then FF_RPATH="-Wl,-rpath,\$\$ORIGIN"; fi \
  && ./configure \
       --prefix=${FFMPEG_PREFIX} \
       \
@@ -687,7 +683,7 @@ RUN . /env.sh && set -eux \
       --pkg-config-flags="--static" \
       \
       --extra-cflags="${CFLAGS} -I${SYSROOT}/include" \
-      --extra-ldflags="-L${SYSROOT}/lib ${FF_RPATH}" \
+      --extra-ldflags="-L${SYSROOT}/lib" \
       --extra-libs="${EXTRA_LIBS}" \
       \
       --enable-shared \
@@ -766,6 +762,16 @@ RUN . /env.sh && set -eux \
  # libva / libva-drm: x86_64 VA-API — absent on minimal server installs
  && if [ "$BUILD_TARGET" = "x86_64" ]; then \
       cp -P /usr/lib/x86_64-linux-gnu/libva*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
+    fi \
+ \
+ # Stamp RUNPATH=$ORIGIN onto the Linux .so files so each resolves its co-located
+ # siblings and bundled deps (librockchip_mpp etc.) from its own directory without
+ # LD_LIBRARY_PATH. Done with patchelf — passing a literal $ORIGIN through FFmpeg's
+ # configure/make flag plumbing is unreliable (a shell expands $$ to the PID).
+ && if [ "$FF_OS" = "linux" ]; then \
+      for so in ${FFMPEG_PREFIX}/lib/*.so*; do \
+        if [ -f "$so" ] && [ ! -L "$so" ]; then patchelf --set-rpath '$ORIGIN' "$so"; fi; \
+      done; \
     fi \
  \
  && cd /build && rm -rf ffmpeg-*
