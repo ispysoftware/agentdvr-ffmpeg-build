@@ -141,11 +141,11 @@ RUN dpkg --add-architecture armhf \
       patch \
       texinfo \
       gettext \
-      # patchelf — used to stamp RUNPATH=$ORIGIN onto the output .so files
-      patchelf \
  && rm -rf /var/lib/apt/lists/* \
  && pip3 install --upgrade pip \
- && pip3 install meson ninja
+ # patchelf via pip (bundles a modern build) — used to stamp RUNPATH=$ORIGIN onto the
+ # output .so files. Buster's apt patchelf is 0.9 (2016) and can corrupt binaries.
+ && pip3 install meson ninja patchelf
 
 # ---------------------------------------------------------------------------
 # 2. Per-target environment
