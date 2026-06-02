@@ -669,6 +669,12 @@ RUN . /env.sh && set -eux \
  && if [ "$IS_CROSS" = "1" ]; then \
       CROSS_COMPILE_FLAGS="--cross-prefix=${TARGET_TRIPLE}- --enable-cross-compile --target-os=${FF_OS}"; \
     fi \
+ # RUNPATH=$ORIGIN so each FFmpeg .so resolves its co-located siblings AND bundled
+ # deps (e.g. librockchip_mpp.so.1 on arm64) from its own directory, without relying
+ # on LD_LIBRARY_PATH or the loader's load order. $$ORIGIN survives make's variable
+ # expansion to emit a literal $ORIGIN. Linux ELF only (meaningless for win64 DLLs).
+ && FF_RPATH="" \
+ && if [ "$FF_OS" = "linux" ]; then FF_RPATH="-Wl,-rpath,\$\$ORIGIN"; fi \
  && ./configure \
       --prefix=${FFMPEG_PREFIX} \
       \
@@ -680,7 +686,7 @@ RUN . /env.sh && set -eux \
       --pkg-config-flags="--static" \
       \
       --extra-cflags="${CFLAGS} -I${SYSROOT}/include" \
-      --extra-ldflags="-L${SYSROOT}/lib" \
+      --extra-ldflags="-L${SYSROOT}/lib ${FF_RPATH}" \
       --extra-libs="${EXTRA_LIBS}" \
       \
       --enable-shared \
@@ -746,6 +752,78 @@ RUN . /env.sh && set -eux \
  # Copy Rockchip MPP shared libs into the output so the tarball is self-contained
  && if [ "$BUILD_TARGET" = "arm64" ]; then \
       cp -P ${SYSROOT}/lib/librockchip_mpp*.so* ${FFMPEG_PREFIX}/lib/; \
+    fi \
+ \
+ # Build a no-op libasound stub for Linux systems where ALSA isn't installed.
+ # The C# loader (FFmpeg/Linux.cs PreloadAlsa) tries the real libasound.so.2 first and
+ # only dlopen(RTLD_GLOBAL)s this stub when ALSA is genuinely absent, so it never shadows
+ # real ALSA. ALSA is Linux-only, so the stub is not built for the win64/mingw target.
+ && cat > /tmp/alsa_stub.c << 'STUB_EOF'
+// Minimal ALSA stub — exports the symbols FFmpeg's libavdevice needs,
+// all returning errors so the library loads but audio devices fail gracefully.
+#include <errno.h>
+#include <stddef.h>
+typedef void snd_pcm_t;
+typedef void snd_pcm_hw_params_t;
+typedef void snd_pcm_sw_params_t;
+typedef unsigned int snd_pcm_access_t;
+typedef unsigned int snd_pcm_format_t;
+typedef unsigned int snd_pcm_stream_t;
+typedef unsigned long snd_pcm_uframes_t;
+typedef long          snd_pcm_sframes_t;
+int  snd_pcm_open(snd_pcm_t **p, const char *n, snd_pcm_stream_t s, int m) { return -ENODEV; }
+int  snd_pcm_close(snd_pcm_t *p) { return 0; }
+int  snd_pcm_hw_params_malloc(snd_pcm_hw_params_t **p) { return -ENOMEM; }
+void snd_pcm_hw_params_free(snd_pcm_hw_params_t *p) {}
+int  snd_pcm_hw_params_any(snd_pcm_t *p, snd_pcm_hw_params_t *h) { return -ENODEV; }
+int  snd_pcm_hw_params_set_access(snd_pcm_t *p, snd_pcm_hw_params_t *h, snd_pcm_access_t a) { return -ENODEV; }
+int  snd_pcm_hw_params_set_format(snd_pcm_t *p, snd_pcm_hw_params_t *h, snd_pcm_format_t f) { return -ENODEV; }
+int  snd_pcm_hw_params_set_channels(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned int c) { return -ENODEV; }
+int  snd_pcm_hw_params_set_rate_near(snd_pcm_t *p, snd_pcm_hw_params_t *h, unsigned int *r, int *d) { return -ENODEV; }
+int  snd_pcm_hw_params_set_period_size_near(snd_pcm_t *p, snd_pcm_hw_params_t *h, snd_pcm_uframes_t *f, int *d) { return -ENODEV; }
+int  snd_pcm_hw_params_set_buffer_size_near(snd_pcm_t *p, snd_pcm_hw_params_t *h, snd_pcm_uframes_t *f) { return -ENODEV; }
+int  snd_pcm_hw_params_get_period_size(const snd_pcm_hw_params_t *h, snd_pcm_uframes_t *f, int *d) { return -ENODEV; }
+int  snd_pcm_hw_params_get_buffer_size(const snd_pcm_hw_params_t *h, snd_pcm_uframes_t *f) { return -ENODEV; }
+int  snd_pcm_hw_params(snd_pcm_t *p, snd_pcm_hw_params_t *h) { return -ENODEV; }
+int  snd_pcm_sw_params_malloc(snd_pcm_sw_params_t **p) { return -ENOMEM; }
+void snd_pcm_sw_params_free(snd_pcm_sw_params_t *p) {}
+int  snd_pcm_sw_params_current(snd_pcm_t *p, snd_pcm_sw_params_t *s) { return -ENODEV; }
+int  snd_pcm_sw_params_set_start_threshold(snd_pcm_t *p, snd_pcm_sw_params_t *s, snd_pcm_uframes_t f) { return -ENODEV; }
+int  snd_pcm_sw_params(snd_pcm_t *p, snd_pcm_sw_params_t *s) { return -ENODEV; }
+int  snd_pcm_prepare(snd_pcm_t *p) { return -ENODEV; }
+int  snd_pcm_start(snd_pcm_t *p) { return -ENODEV; }
+int  snd_pcm_drop(snd_pcm_t *p) { return -ENODEV; }
+int  snd_pcm_drain(snd_pcm_t *p) { return -ENODEV; }
+snd_pcm_sframes_t snd_pcm_readi(snd_pcm_t *p, void *b, snd_pcm_uframes_t s) { return -ENODEV; }
+snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *p, const void *b, snd_pcm_uframes_t s) { return -ENODEV; }
+snd_pcm_sframes_t snd_pcm_avail_update(snd_pcm_t *p) { return -ENODEV; }
+int  snd_pcm_recover(snd_pcm_t *p, int err, int silent) { return -ENODEV; }
+const char *snd_strerror(int e) { return "ALSA not available"; }
+int  snd_device_name_hint(int c, const char *iface, void ***hints) { *hints = NULL; return 0; }
+char *snd_device_name_get_hint(const void *hint, const char *id) { return NULL; }
+int  snd_device_name_free_hint(void **hints) { return 0; }
+STUB_EOF
+ && if [ "$FF_OS" = "linux" ]; then \
+      # -soname libasound.so.2 is REQUIRED. The C# loader dlopen()s this stub with
+      # RTLD_GLOBAL, and the dynamic linker only satisfies libavdevice's NEEDED
+      # libasound.so.2 from an already-loaded object whose DT_SONAME matches. Without
+      # -soname no SONAME is written, the names don't match, and the preload is a no-op.
+      ${CC} -shared -fPIC -Wl,-soname,libasound.so.2 \
+            -o ${FFMPEG_PREFIX}/lib/libasound_stub.so.2 /tmp/alsa_stub.c; \
+    fi \
+ && rm -f /tmp/alsa_stub.c \
+ \
+ # Copy shared loader libs that are linked at build time but not installed on all targets.
+ # Without these, dlopen fails on the target and all FFmpeg function pointers stay null.
+ #
+ # libvulkan: arm64 + x86_64 (Vulkan enabled on both)
+ && if [ "$BUILD_TARGET" = "arm64" ] || [ "$BUILD_TARGET" = "x86_64" ]; then \
+      cp -P ${SYSROOT}/lib/libvulkan*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
+    fi \
+ \
+ # libva / libva-drm: x86_64 VA-API — absent on minimal server installs
+ && if [ "$BUILD_TARGET" = "x86_64" ]; then \
+      cp -P /usr/lib/x86_64-linux-gnu/libva*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
     fi \
  \
  && cd /build && rm -rf ffmpeg-*
