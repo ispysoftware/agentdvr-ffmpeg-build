@@ -807,10 +807,7 @@ int  snd_device_name_hint(int c, const char *iface, void ***hints) { *hints = NU
 char *snd_device_name_get_hint(const void *hint, const char *id) { return NULL; }
 int  snd_device_name_free_hint(void **hints) { return 0; }
 STUB_EOF
- && if [ "$FF_OS" = "linux" ]; then \
-      ${CC} -shared -fPIC -Wl,-soname,libasound.so.2 \
-            -o ${FFMPEG_PREFIX}/lib/libasound_stub.so.2 /tmp/alsa_stub.c; \
-    fi \
+ && if [ "$FF_OS" = "linux" ]; then ${CC} -shared -fPIC -Wl,-soname,libasound.so.2 -o ${FFMPEG_PREFIX}/lib/libasound_stub.so.2 /tmp/alsa_stub.c; fi \
  && rm -f /tmp/alsa_stub.c \
  \
  # Copy shared loader libs that are linked at build time but not installed on all targets.
