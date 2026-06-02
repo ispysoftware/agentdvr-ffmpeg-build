@@ -759,6 +759,9 @@ RUN . /env.sh && set -eux \
  # The C# loader (FFmpeg/Linux.cs PreloadAlsa) tries the real libasound.so.2 first and
  # only dlopen(RTLD_GLOBAL)s this stub when ALSA is genuinely absent, so it never shadows
  # real ALSA. ALSA is Linux-only, so the stub is not built for the win64/mingw target.
+ # NOTE: the -soname libasound.so.2 on the compile step below is REQUIRED — the dlopen'd
+ # stub only satisfies libavdevice's NEEDED entry when its DT_SONAME matches; without it
+ # the preload is a no-op. The build is gated on FF_OS=linux (skipped for win64/mingw).
  && cat > /tmp/alsa_stub.c << 'STUB_EOF'
 // Minimal ALSA stub — exports the symbols FFmpeg's libavdevice needs,
 // all returning errors so the library loads but audio devices fail gracefully.
@@ -804,11 +807,6 @@ int  snd_device_name_hint(int c, const char *iface, void ***hints) { *hints = NU
 char *snd_device_name_get_hint(const void *hint, const char *id) { return NULL; }
 int  snd_device_name_free_hint(void **hints) { return 0; }
 STUB_EOF
- \
- # -soname libasound.so.2 is REQUIRED: the C# loader dlopen()s this stub with RTLD_GLOBAL
- # and the dynamic linker only satisfies libavdevice's NEEDED libasound.so.2 from an
- # already-loaded object whose DT_SONAME matches. Without -soname the preload is a no-op.
- # Linux ELF only — ALSA is not used on the win64/mingw target.
  && if [ "$FF_OS" = "linux" ]; then \
       ${CC} -shared -fPIC -Wl,-soname,libasound.so.2 \
             -o ${FFMPEG_PREFIX}/lib/libasound_stub.so.2 /tmp/alsa_stub.c; \
