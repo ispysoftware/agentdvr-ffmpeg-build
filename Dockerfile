@@ -755,14 +755,36 @@ RUN . /env.sh && set -eux \
       cp -P ${SYSROOT}/lib/librockchip_mpp*.so* ${FFMPEG_PREFIX}/lib/; \
     fi \
  \
- # Build a no-op libasound stub for Linux systems where ALSA isn't installed.
- # The C# loader (FFmpeg/Linux.cs PreloadAlsa) tries the real libasound.so.2 first and
- # only dlopen(RTLD_GLOBAL)s this stub when ALSA is genuinely absent, so it never shadows
- # real ALSA. ALSA is Linux-only, so the stub is not built for the win64/mingw target.
- # NOTE: the -soname libasound.so.2 on the compile step below is REQUIRED — the dlopen'd
- # stub only satisfies libavdevice's NEEDED entry when its DT_SONAME matches; without it
- # the preload is a no-op. The build is gated on FF_OS=linux (skipped for win64/mingw).
- && cat > /tmp/alsa_stub.c << 'STUB_EOF'
+ # Copy shared loader libs that are linked at build time but not installed on all targets.
+ # Without these, dlopen fails on the target and all FFmpeg function pointers stay null.
+ #
+ # libvulkan: arm64 + x86_64 (Vulkan enabled on both)
+ && if [ "$BUILD_TARGET" = "arm64" ] || [ "$BUILD_TARGET" = "x86_64" ]; then \
+      cp -P ${SYSROOT}/lib/libvulkan*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
+    fi \
+ \
+ # libva / libva-drm: x86_64 VA-API — absent on minimal server installs
+ && if [ "$BUILD_TARGET" = "x86_64" ]; then \
+      cp -P /usr/lib/x86_64-linux-gnu/libva*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
+    fi \
+ \
+ && cd /build && rm -rf ffmpeg-*
+
+# ---------------------------------------------------------------------------
+# libasound stub  (Linux targets only)
+# A no-op libasound.so for systems that don't have ALSA installed. The C# loader
+# (FFmpeg/Linux.cs PreloadAlsa) tries the real libasound.so.2 first and only
+# dlopen(RTLD_GLOBAL)s this stub when ALSA is absent, so it never shadows real ALSA.
+# -soname libasound.so.2 is REQUIRED: the dlopen'd stub only satisfies libavdevice's
+# NEEDED entry when its DT_SONAME matches; without it the preload is a no-op.
+# Built in its own RUN with a first-class heredoc — a shell heredoc cannot be embedded
+# mid-way in a &&-continued RUN chain (the instruction ends at the heredoc terminator).
+# ---------------------------------------------------------------------------
+RUN <<'STUBSH'
+set -eux
+. /env.sh
+[ "$FF_OS" = "linux" ] || exit 0
+cat > /tmp/alsa_stub.c <<'STUB_EOF'
 // Minimal ALSA stub — exports the symbols FFmpeg's libavdevice needs,
 // all returning errors so the library loads but audio devices fail gracefully.
 #include <errno.h>
@@ -807,23 +829,9 @@ int  snd_device_name_hint(int c, const char *iface, void ***hints) { *hints = NU
 char *snd_device_name_get_hint(const void *hint, const char *id) { return NULL; }
 int  snd_device_name_free_hint(void **hints) { return 0; }
 STUB_EOF
- && if [ "$FF_OS" = "linux" ]; then ${CC} -shared -fPIC -Wl,-soname,libasound.so.2 -o ${FFMPEG_PREFIX}/lib/libasound_stub.so.2 /tmp/alsa_stub.c; fi \
- && rm -f /tmp/alsa_stub.c \
- \
- # Copy shared loader libs that are linked at build time but not installed on all targets.
- # Without these, dlopen fails on the target and all FFmpeg function pointers stay null.
- #
- # libvulkan: arm64 + x86_64 (Vulkan enabled on both)
- && if [ "$BUILD_TARGET" = "arm64" ] || [ "$BUILD_TARGET" = "x86_64" ]; then \
-      cp -P ${SYSROOT}/lib/libvulkan*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
-    fi \
- \
- # libva / libva-drm: x86_64 VA-API — absent on minimal server installs
- && if [ "$BUILD_TARGET" = "x86_64" ]; then \
-      cp -P /usr/lib/x86_64-linux-gnu/libva*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
-    fi \
- \
- && cd /build && rm -rf ffmpeg-*
+${CC} -shared -fPIC -Wl,-soname,libasound.so.2 -o ${FFMPEG_PREFIX}/lib/libasound_stub.so.2 /tmp/alsa_stub.c
+rm -f /tmp/alsa_stub.c
+STUBSH
 
 # ============================================================================
 # Dist stage — minimal image: nothing but /ffmpeg
