@@ -52,6 +52,7 @@ ARG FFNVCODEC_VER=n12.2.72.0
 ARG VULKAN_VER=1.3.296
 ARG AMF_VER=1.5.2
 ARG LIBDRM_VER=2.4.120
+ARG LIBVA_VER=2.23.0
 # MPP is cloned from nyanmisaka/rk-mirrors (jellyfin-mpp-next branch) — no tarball version
 
 # ── Target: armhf | arm64 | x86_64
@@ -64,7 +65,7 @@ FROM debian:buster AS builder
 
 ARG FFMPEG_VER NASM_VER ZLIB_VER BZIP2_VER XZ_VER OPENSSL_VER
 ARG OGG_VER VORBIS_VER OPUS_VER LAME_VER VPX_VER DAV1D_VER X264_VER
-ARG FFNVCODEC_VER VULKAN_VER AMF_VER LIBDRM_VER
+ARG FFNVCODEC_VER VULKAN_VER AMF_VER LIBDRM_VER LIBVA_VER
 ARG TARGET
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -125,8 +126,10 @@ RUN dpkg --add-architecture armhf \
       libasound2-dev \
       libasound2-dev:armhf \
       libasound2-dev:arm64 \
-      # VA-API headers (x86_64 Intel/AMD hardware decode)
-      libva-dev \
+      # libdrm headers — needed to build libva's DRM backend (x86_64).
+      # libva itself is built from source below; Buster's libva 2.4 is too old
+      # to load drivers built against newer VA-API versions.
+      libdrm-dev \
       # Vulkan runtime .so for linking — headers come from KhronosGroup GitHub
       # (Debian buster/bullseye ship 1.x which is below FFmpeg 8.1's 1.3.277 minimum)
       libvulkan1 \
@@ -594,6 +597,39 @@ RUN . /env.sh && set -eux \
     fi
 
 # ---------------------------------------------------------------------------
+# libva  (x86_64 only — VA-API loader, built from source and bundled)
+# Buster's libva 2.4 (2019) only probes driver entry points
+# __vaDriverInit_1_0 .. __vaDriverInit_1_4; drivers built against newer
+# VA-API (any current Mesa radeonsi / Intel iHD) export a higher minor and
+# fail vaInitialize() with EIO even when correctly installed. Bundling a
+# current libva lets the tarball load whatever driver the runtime provides.
+# The driver itself (mesa-va-drivers / intel-media-driver) must still exist
+# on the host or in the runtime container — bundling Mesa+LLVM (~200MB,
+# kernel-coupled) is not practical.
+# driverdir is a colon-separated compiled-in search path (libva splits it
+# like LIBVA_DRIVERS_PATH): Debian/Ubuntu multiarch, Arch/Alpine, Fedora.
+# LIBVA_DRIVERS_PATH env still overrides at runtime.
+# ---------------------------------------------------------------------------
+RUN . /env.sh && set -eux \
+ && if [ "$BUILD_TARGET" = "x86_64" ]; then \
+      wget -q \
+        "https://github.com/intel/libva/releases/download/${LIBVA_VER}/libva-${LIBVA_VER}.tar.bz2" \
+      && tar xf libva-${LIBVA_VER}.tar.bz2 && cd libva-${LIBVA_VER} \
+      && meson setup _build \
+           --prefix=${SYSROOT} \
+           --libdir=lib \
+           --buildtype=release \
+           --default-library=shared \
+           -Ddisable_drm=false \
+           -Dwith_x11=no \
+           -Dwith_glx=no \
+           -Dwith_wayland=no \
+           -Ddriverdir=/usr/lib/x86_64-linux-gnu/dri:/usr/lib/dri:/usr/lib64/dri \
+      && ninja -C _build -j$(nproc) && ninja -C _build install \
+      && cd /build && rm -rf libva-*; \
+    fi
+
+# ---------------------------------------------------------------------------
 # Rockchip MPP  (rockchip only — VPU H.264/H.265 hardware codec)
 # Built as shared library; shipped in the output tarball alongside FFmpeg.
 # Target device needs the rkvdec / mpp_service kernel driver.
@@ -759,9 +795,10 @@ RUN . /env.sh && set -eux \
       cp -P ${SYSROOT}/lib/libvulkan*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
     fi \
  \
- # libva / libva-drm: x86_64 VA-API — absent on minimal server installs
+ # libva / libva-drm: x86_64 VA-API — our source-built copy (see libva stage),
+ # NOT the Buster system copy, which is too old to load current Mesa drivers.
  && if [ "$BUILD_TARGET" = "x86_64" ]; then \
-      cp -P /usr/lib/x86_64-linux-gnu/libva*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
+      cp -P ${SYSROOT}/lib/libva*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
     fi \
  \
  # Stamp RUNPATH=$ORIGIN onto the Linux .so files so each resolves its co-located
