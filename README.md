@@ -16,14 +16,16 @@ FFmpeg.AutoGen loads FFmpeg's shared libraries at runtime via P/Invoke. The libr
 |--------------|-------------------------|---------------|--------------------------------------------------------------|
 | `armhf`      | Docker / Debian Buster  | glibc 2.28    | V4L2 M2M (Pi 2/3/4 H.264 kernel decoder)                    |
 | `arm64`      | Docker / Debian Buster  | glibc 2.28    | V4L2 M2M · Rockchip MPP (RK3566/RK3568/RK3588) · NVENC/NVDEC (Jetson) · Vulkan |
-| `x86_64`     | Docker / Debian Buster  | glibc 2.28    | VA-API (Intel/AMD) · NVENC/NVDEC (NVIDIA) · Vulkan · AMF (AMD) |
+| `x86_64`     | Docker / Debian Buster  | glibc 2.28    | VA-API (Intel/AMD)¹ · NVENC/NVDEC (NVIDIA) · Vulkan · AMF (AMD) |
 | `win64`      | Docker / MinGW-w64      | Windows 10+   | D3D11VA · DXVA2 · NVENC/NVDEC (NVIDIA) · AMF (AMD)          |
 | `macos-arm64`| Native / macOS runner   | macOS 12+     | VideoToolbox · AudioToolbox                                  |
 | `macos-x86_64`| Native / macOS runner  | macOS 12+     | VideoToolbox · AudioToolbox                                  |
 
+¹ VA-API needs a host-provided GPU driver at runtime (libva is bundled, the driver is not). See [Bundled shared libraries](#bundled-shared-libraries-linux) and [Docker / VA-API](#docker--va-api).
+
 ## Codec libraries bundled
 
-All dependencies are compiled statically into the FFmpeg `.so` / `.dylib` / `.dll` files — nothing extra to deploy alongside them.
+All dependencies are compiled statically into the FFmpeg `.so` / `.dylib` / `.dll` files — nothing extra to deploy alongside them. The two exceptions are the runtime loader libraries listed under [Bundled shared libraries](#bundled-shared-libraries-linux) below, which are shipped as `.so` files in the same directory.
 
 | Library     | Version | Licence     | Purpose                          |
 |-------------|---------|-------------|----------------------------------|
@@ -46,6 +48,18 @@ All dependencies are compiled statically into the FFmpeg `.so` / `.dylib` / `.dl
 | libdrm        | MIT         | DRM Prime buffer sharing (required by rkmpp)       |
 
 > **Note on Rockchip MPP source.** The canonical `rockchip-linux/mpp` repo was DMCA-taken-down in December 2025. This build clones `nyanmisaka/rk-mirrors` (branch `jellyfin-mpp-next`) — the same fork Jellyfin uses in production.
+
+## Bundled shared libraries (Linux)
+
+A few libraries can't be statically linked because they are runtime loaders that must `dlopen` a driver provided by the host. These ship as `.so` files inside the tarball, next to the FFmpeg libs, each stamped with `RUNPATH=$ORIGIN` so they resolve from their own directory without `LD_LIBRARY_PATH`.
+
+| Library    | Targets        | Why it's shipped, not static                                  |
+|------------|----------------|---------------------------------------------------------------|
+| libva (`libva.so.2`, `libva-drm.so.2`) | x86_64 | VA-API loader. **Built from source (2.23.0)**, not taken from the Buster base image. Buster's libva 2.4 (2019) only probes driver entry points up to `__vaDriverInit_1_4`; any current Mesa `radeonsi` / Intel `iHD` driver exports a higher VA-API minor and fails `vaInitialize()` with `EIO` (FFmpeg reports `ret=-5`) even when the driver is correctly installed. Bundling a current libva lets the tarball load whatever driver the host provides. |
+| libvulkan  | arm64, x86_64  | Vulkan loader — links at build time but isn't present on minimal installs. |
+| librockchip_mpp | arm64     | Rockchip VPU codec (see [arm64 only](#arm64-only) above).      |
+
+> **The driver itself is not bundled.** The Mesa VA-API driver (`radeonsi_drv_video.so` for AMD, `iHD_drv_video.so` for Intel) pulls in `libLLVM` (~200 MB) and is coupled to the host kernel/GPU, so it must come from the host's package manager. This is the same split jellyfin-ffmpeg uses. The `linux_setup2.sh` installer in [agent-install-scripts](https://github.com/ispysoftware/agent-install-scripts) installs `mesa-va-drivers` / `intel-media-va-driver` for bare-metal installs; **Docker images must install it themselves** — see [Docker / VA-API](#docker--va-api) below.
 
 ## CI — GitHub Actions
 
@@ -213,6 +227,31 @@ The `ldd` / `nm` checks in the Dockerfile verify the glibc floor before exportin
 
 **Rockchip MPP not found at runtime.**  
 The kernel driver (`rkvdec` / `mpp_service`) must be loaded. Check `lsmod | grep rkvdec`. On non-Rockchip hardware this is expected — FFmpeg falls back to software decode.
+
+### Docker / VA-API
+
+**`VAAPI open failed on /dev/dri/renderD128 (ret=-5)` / falls back to software encoding.**  
+`ret=-5` is `AVERROR(EIO)` — the device node opened but the VA-API driver failed to initialise. (A permissions problem returns `-13`/`EACCES` instead — that one *is* the `video`/`render` group issue.) `-5` almost always means **the Mesa VA-API driver is missing from the image**. libva is bundled in the tarball; the driver is not. Install it in the container image and map the device:
+
+```dockerfile
+# Debian/Ubuntu base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      mesa-va-drivers \                 # AMD (radeonsi)
+      intel-media-va-driver-non-free \  # Intel Gen8+ (iHD); use i965-va-driver for older
+      libva-utils                       # provides vainfo, for debugging
+# Alpine: apk add libva-mesa-driver intel-media-driver libva-utils
+# Fedora: dnf install mesa-va-drivers intel-media-driver libva-utils
+```
+
+```yaml
+# docker run / compose — map the GPU in
+devices:
+  - /dev/dri:/dev/dri
+```
+
+Verify inside the running container with `vainfo --display drm --device /dev/dri/renderD128`. If it lists profiles, AgentDVR will pick up hardware encode on next start. If `vainfo` reports no driver despite the package being installed, set `LIBVA_DRIVER_NAME=radeonsi` (AMD) or `iHD` (Intel) as a container env var.
+
+> **NVIDIA is the opposite model** — install nothing in the image. The host driver is injected by the [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-container-toolkit) (`--gpus all`), which bind-mounts `libnvcuvid` / `libnvidia-encode` matching the host driver version. Installing NVIDIA userspace libs in the image breaks this.
 
 **win64 DLLs not found by FFmpeg.AutoGen.**  
 Put the DLLs in the same directory as the application `.exe`, or anywhere on `PATH`. FFmpeg.AutoGen calls `LoadLibrary` with bare names (`avcodec-62.dll` etc.) — the Windows loader resolves from the application directory first.
