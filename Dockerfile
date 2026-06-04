@@ -787,14 +787,12 @@ RUN . /env.sh && set -eux \
       cp -P ${SYSROOT}/lib/librockchip_mpp*.so* ${FFMPEG_PREFIX}/lib/; \
     fi \
  \
- # Copy shared loader libs that are linked at build time but not installed on all targets.
- # Without these, dlopen fails on the target and all FFmpeg function pointers stay null.
+ # libvulkan is deliberately NOT bundled: FFmpeg dlopens libvulkan.so.1 at
+ # runtime (no NEEDED entry), and a bundled copy would shadow the system
+ # loader via RUNPATH=$ORIGIN. Buster's 1.1.97 loader is too old for FFmpeg
+ # 8.1's Vulkan code (requires 1.3+); the system loader ships alongside the
+ # GPU ICDs (mesa-vulkan-drivers etc.) on any system where Vulkan works.
  #
- # libvulkan: arm64 + x86_64 (Vulkan enabled on both)
- && if [ "$BUILD_TARGET" = "arm64" ] || [ "$BUILD_TARGET" = "x86_64" ]; then \
-      cp -P ${SYSROOT}/lib/libvulkan*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
-    fi \
- \
  # libva / libva-drm: x86_64 VA-API — our source-built copy (see libva stage),
  # NOT the Buster system copy, which is too old to load current Mesa drivers.
  && if [ "$BUILD_TARGET" = "x86_64" ]; then \

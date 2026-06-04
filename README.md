@@ -56,8 +56,9 @@ A few libraries can't be statically linked because they are runtime loaders that
 | Library    | Targets        | Why it's shipped, not static                                  |
 |------------|----------------|---------------------------------------------------------------|
 | libva (`libva.so.2`, `libva-drm.so.2`) | x86_64 | VA-API loader. **Built from source (2.23.0)**, not taken from the Buster base image. Buster's libva 2.4 (2019) only probes driver entry points up to `__vaDriverInit_1_4`; any current Mesa `radeonsi` / Intel `iHD` driver exports a higher VA-API minor and fails `vaInitialize()` with `EIO` (FFmpeg reports `ret=-5`) even when the driver is correctly installed. Bundling a current libva lets the tarball load whatever driver the host provides. |
-| libvulkan  | arm64, x86_64  | Vulkan loader — links at build time but isn't present on minimal installs. |
 | librockchip_mpp | arm64     | Rockchip VPU codec (see [arm64 only](#arm64-only) above).      |
+
+> **libvulkan is deliberately not bundled.** FFmpeg dlopens `libvulkan.so.1` at runtime (it is not a `NEEDED` dependency), so its absence cannot break library loading — Vulkan acceleration simply probes unavailable. A bundled copy would shadow the host's modern loader via `RUNPATH=$ORIGIN` (the libva bug all over again), and the loader is useless without GPU ICDs, which always install a current loader as a package dependency.
 
 > **The driver itself is not bundled.** The Mesa VA-API driver (`radeonsi_drv_video.so` for AMD, `iHD_drv_video.so` for Intel) pulls in `libLLVM` (~200 MB) and is coupled to the host kernel/GPU, so it must come from the host's package manager. This is the same split jellyfin-ffmpeg uses. The `linux_setup2.sh` installer in [agent-install-scripts](https://github.com/ispysoftware/agent-install-scripts) installs `mesa-va-drivers` / `intel-media-va-driver` for bare-metal installs; **Docker images must install it themselves** — see [Docker / VA-API](#docker--va-api) below.
 
