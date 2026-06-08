@@ -679,8 +679,8 @@ RUN . /env.sh && set -eux \
            -DBUILD_TESTS=OFF \
            -DBUILD_EXAMPLES=OFF \
            -DINSTALL_EXAMPLES=OFF \
-      && cmake --build _build -j$(nproc) \
-      && cmake --install _build \
+      && make -C _build -j$(nproc) \
+      && make -C _build install \
       && cd /build && rm -rf libvpl-*; \
     fi
 
