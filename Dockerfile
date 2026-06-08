@@ -53,6 +53,8 @@ ARG VULKAN_VER=1.3.296
 ARG AMF_VER=1.5.2
 ARG LIBDRM_VER=2.4.120
 ARG LIBVA_VER=2.23.0
+ARG X265_VER=3.6
+ARG VPL_VER=2.15.0
 # MPP is cloned from nyanmisaka/rk-mirrors (jellyfin-mpp-next branch) — no tarball version
 
 # ── Target: armhf | arm64 | x86_64
@@ -65,7 +67,7 @@ FROM debian:buster AS builder
 
 ARG FFMPEG_VER NASM_VER ZLIB_VER BZIP2_VER XZ_VER OPENSSL_VER
 ARG OGG_VER VORBIS_VER OPUS_VER LAME_VER VPX_VER DAV1D_VER X264_VER
-ARG FFNVCODEC_VER VULKAN_VER AMF_VER LIBDRM_VER LIBVA_VER
+ARG FFNVCODEC_VER VULKAN_VER AMF_VER LIBDRM_VER LIBVA_VER X265_VER VPL_VER
 ARG TARGET
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -198,9 +200,11 @@ case "$TARGET" in
     VPX_TARGET=x86_64-linux-gcc
     FF_ARCH="--arch=x86_64"
     FF_EXTRA=""
-    FF_HW="--enable-vaapi --enable-nvenc --enable-nvdec --enable-vulkan --enable-amf"
+    FF_HW="--enable-vaapi --enable-nvenc --enable-nvdec --enable-vulkan --enable-amf --enable-libvpl --enable-libx265"
     FF_OS=linux ; FF_WIN_FLAGS=""
-    EXTRA_LIBS="-lpthread -lm"
+    # libx265 and libvpl are C++ and libvpl dlopen's its runtime — static-linking
+    # them into the otherwise-C ffmpeg needs -lstdc++ and -ldl explicit in link order.
+    EXTRA_LIBS="-lpthread -lm -lstdc++ -ldl"
     HARDENING_FLAGS="-fstack-protector-strong"
     MESON_CPU_FAMILY=x86_64 ; MESON_CPU=x86_64 ; MESON_SYSTEM=linux
     IS_CROSS=0 ; BUILD_TARGET=x86_64
@@ -513,6 +517,31 @@ RUN . /env.sh && set -eux \
  && cd /build && rm -rf x264-*
 
 # ---------------------------------------------------------------------------
+# libx265  (GPL — software HEVC encoder; x86_64 only)
+# x86_64 Linux is the ONLY target without a HEVC-encode fallback: Windows has
+# hevc_mf, macOS has hevc_videotoolbox, arm has rkmpp/v4l2m2m/nvenc. Without
+# this, HEVC encode on a GPU-less (or HW-HEVC-incapable) Linux host has no path
+# at all and fails hard. 8-bit Main is all the record/WebRTC transcode needs.
+# (A generic arm64 server with no rkmpp/nvenc has the same gap — extend here
+# with a cmake cross-toolchain file if that ever becomes a supported target.)
+# ---------------------------------------------------------------------------
+RUN . /env.sh && set -eux \
+ && if [ "$BUILD_TARGET" = "x86_64" ]; then \
+      wget -q \
+        "https://bitbucket.org/multicoreware/x265_git/downloads/x265_${X265_VER}.tar.gz" \
+      && tar xf x265_${X265_VER}.tar.gz && cd x265_${X265_VER} \
+      && mkdir -p _build && cd _build \
+      && cmake -G "Unix Makefiles" \
+           -DCMAKE_INSTALL_PREFIX=${SYSROOT} \
+           -DENABLE_SHARED=OFF \
+           -DENABLE_CLI=OFF \
+           -DENABLE_PIC=ON \
+           ../source \
+      && make -j$(nproc) && make install \
+      && cd /build && rm -rf x265_*; \
+    fi
+
+# ---------------------------------------------------------------------------
 # ffnvcodec  (NVIDIA codec headers — header-only)
 # x86_64: NVENC/NVDEC/CUDA.  arm64: NVENC/NVDEC on Jetson boards.
 # Links against the NVIDIA driver at runtime; no .so needed at build time.
@@ -627,6 +656,32 @@ RUN . /env.sh && set -eux \
            -Ddriverdir=/usr/lib/x86_64-linux-gnu/dri:/usr/lib/dri:/usr/lib64/dri \
       && ninja -C _build -j$(nproc) && ninja -C _build install \
       && cd /build && rm -rf libva-*; \
+    fi
+
+# ---------------------------------------------------------------------------
+# oneVPL dispatcher / libvpl  (Intel QSV; x86_64 only)
+# Builds ONLY the dispatcher + vpl.pc that FFmpeg's --enable-libvpl needs, so
+# h264_qsv / hevc_qsv compile in. At RUNTIME the container must ALSO ship the
+# Intel GPU runtime (intel/vpl-gpu-rt, a.k.a. intel-onevpl-* / libmfx-gen) plus
+# the iHD driver, or QSV init fails even though the encoders now exist. Keep the
+# dispatcher (build) and the GPU runtime (image) in lockstep.
+# ---------------------------------------------------------------------------
+RUN . /env.sh && set -eux \
+ && if [ "$BUILD_TARGET" = "x86_64" ]; then \
+      wget -q \
+        "https://github.com/intel/libvpl/archive/refs/tags/v${VPL_VER}.tar.gz" \
+        -O libvpl-${VPL_VER}.tar.gz \
+      && tar xf libvpl-${VPL_VER}.tar.gz && cd libvpl-${VPL_VER} \
+      && cmake -B _build \
+           -DCMAKE_INSTALL_PREFIX=${SYSROOT} \
+           -DCMAKE_BUILD_TYPE=Release \
+           -DBUILD_SHARED_LIBS=OFF \
+           -DBUILD_TESTS=OFF \
+           -DBUILD_EXAMPLES=OFF \
+           -DINSTALL_EXAMPLES=OFF \
+      && cmake --build _build -j$(nproc) \
+      && cmake --install _build \
+      && cd /build && rm -rf libvpl-*; \
     fi
 
 # ---------------------------------------------------------------------------
