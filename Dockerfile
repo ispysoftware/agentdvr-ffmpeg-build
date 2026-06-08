@@ -675,7 +675,7 @@ RUN . /env.sh && set -eux \
       && cmake -B _build \
            -DCMAKE_INSTALL_PREFIX=${SYSROOT} \
            -DCMAKE_BUILD_TYPE=Release \
-           -DBUILD_SHARED_LIBS=OFF \
+           -DBUILD_SHARED_LIBS=ON \
            -DBUILD_TESTS=OFF \
            -DBUILD_EXAMPLES=OFF \
            -DINSTALL_EXAMPLES=OFF \
@@ -850,8 +850,12 @@ RUN . /env.sh && set -eux \
  #
  # libva / libva-drm: x86_64 VA-API — our source-built copy (see libva stage),
  # NOT the Buster system copy, which is too old to load current Mesa drivers.
+ # libvpl: the oneVPL dispatcher (QSV). libavcodec.so carries a NEEDED entry for
+ # it, so it MUST travel with the build — fail loudly if it's missing rather than
+ # ship a binary that can't load. The GPU runtime it dlopens stays the container's job.
  && if [ "$BUILD_TARGET" = "x86_64" ]; then \
       cp -P ${SYSROOT}/lib/libva*.so* ${FFMPEG_PREFIX}/lib/ 2>/dev/null || true; \
+      cp -P ${SYSROOT}/lib/libvpl*.so* ${FFMPEG_PREFIX}/lib/; \
     fi \
  \
  # Stamp RUNPATH=$ORIGIN onto the Linux .so files so each resolves its co-located
