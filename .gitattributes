@@ -1,0 +1,35 @@
+# Line-ending policy for ffmpeg_build.
+#
+# Why this exists: the Dockerfile is bash-heavy (RUN <<'SETUP' heredocs, a
+# BUILD_TARGET case statement, a \-continued ./configure). If the file is CRLF,
+# the in-container shell sees a trailing \r on every line — e.g. BUILD_TARGET
+# becomes "arm64\r", so `[ "$BUILD_TARGET" = "arm64" ]` guards silently fail and
+# ./configure flags get mangled. Pin shell/Docker files to LF so it can't recur.
+
+# Default: treat as text, normalize to LF in the working tree.
+* text=auto eol=lf
+
+# Shell / Docker / CI — MUST be LF
+Dockerfile        text eol=lf
+*.sh              text eol=lf
+*.sh.example      text eol=lf
+*.bash            text eol=lf
+*.yml             text eol=lf
+*.yaml            text eol=lf
+
+# Windows scripts — keep CRLF
+*.ps1             text eol=crlf
+*.psm1            text eol=crlf
+*.cmd             text eol=crlf
+*.bat             text eol=crlf
+
+# Binaries — never touch
+*.tar.xz          binary
+*.tar.gz          binary
+*.zip             binary
+*.png             binary
+*.jpg             binary
+*.jpeg            binary
+*.gif             binary
+*.ico             binary
+*.icns            binary
