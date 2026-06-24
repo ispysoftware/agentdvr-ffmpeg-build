@@ -32,10 +32,10 @@ if ($Arch -eq "") {
     Write-Host "Usage:  .\build.ps1 -Arch <arch> [options]" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Targets (-Arch):"
-    Write-Host "  x64     linux-x86_64 (Debian Buster, glibc 2.28)  VA-API, NVENC/NVDEC, Vulkan, AMF"
+    Write-Host "  x64     linux-x86_64 (Debian Buster, glibc 2.28)  VA-API, QSV, NVENC/NVDEC, Vulkan, AMF"
     Write-Host "  arm64   linux-arm64  (Debian Buster, glibc 2.28)  V4L2 M2M, Rockchip MPP, NVENC/NVDEC, Vulkan"
     Write-Host "  armhf   linux-armhf  (Debian Buster, glibc 2.28)  V4L2 M2M"
-    Write-Host "  win64   windows-x64  (MinGW-w64 cross)             D3D11VA, DXVA2, NVENC/NVDEC, AMF"
+    Write-Host "  win64   windows-x64  (MinGW-w64 cross)             D3D11VA, DXVA2, QSV, NVENC/NVDEC, AMF"
     Write-Host "  both    x64 + arm64"
     Write-Host "  all     x64 + arm64 + armhf + win64"
     Write-Host ""

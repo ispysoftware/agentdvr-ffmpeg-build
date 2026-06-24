@@ -18,7 +18,8 @@
 #   armhf   V4L2 M2M  (Pi 4/5 H.264 hw decode via kernel driver)
 #   arm64   V4L2 M2M  ·  Rockchip MPP (RK VPU, ignored on non-RK boards)
 #           NVENC/NVDEC (Jetson)  ·  Vulkan (Mali, VideoCore VII)
-#   x86_64  VA-API (Intel/AMD)  ·  NVENC/NVDEC (NVIDIA)  ·  Vulkan  ·  AMF (AMD)
+#   x86_64  VA-API (Intel/AMD)  ·  QSV (Intel, libvpl)  ·  NVENC/NVDEC (NVIDIA)  ·  Vulkan  ·  AMF (AMD)
+#   win64   D3D11VA  ·  DXVA2  ·  QSV (Intel, libvpl)  ·  NVENC/NVDEC (NVIDIA)  ·  AMF (AMD)
 #
 # ── Licence note ─────────────────────────────────────────────────────────────
 #   --enable-gpl  → GPL 2+ build (required for libx264).
@@ -220,7 +221,7 @@ case "$TARGET" in
     VPX_TARGET=x86_64-win64-gcc
     FF_ARCH="--arch=x86_64"
     FF_EXTRA=""
-    FF_HW="--enable-d3d11va --enable-dxva2 --enable-nvenc --enable-nvdec --enable-amf"
+    FF_HW="--enable-d3d11va --enable-dxva2 --enable-nvenc --enable-nvdec --enable-amf --enable-libvpl"
     FF_OS=mingw32
     FF_WIN_FLAGS="--enable-w32threads --windres=${TRIPLE}-windres"
     EXTRA_LIBS=""
@@ -659,20 +660,40 @@ RUN . /env.sh && set -eux \
     fi
 
 # ---------------------------------------------------------------------------
-# oneVPL dispatcher / libvpl  (Intel QSV; x86_64 only)
+# oneVPL dispatcher / libvpl  (Intel QSV; x86_64 Linux + win64 Windows)
 # Builds ONLY the dispatcher + vpl.pc that FFmpeg's --enable-libvpl needs, so
-# h264_qsv / hevc_qsv compile in. At RUNTIME the container must ALSO ship the
-# Intel GPU runtime (intel/vpl-gpu-rt, a.k.a. intel-onevpl-* / libmfx-gen) plus
-# the iHD driver, or QSV init fails even though the encoders now exist. Keep the
-# dispatcher (build) and the GPU runtime (image) in lockstep.
+# h264_qsv / hevc_qsv compile in. At RUNTIME the host must ALSO provide the Intel
+# GPU runtime + driver, or QSV init fails even though the encoders now exist:
+#   - Linux  : ship intel/vpl-gpu-rt (intel-onevpl-* / libmfx-gen) + the iHD driver.
+#   - Windows: the user's Intel graphics driver already ships the VPL/MSDK runtime;
+#              we bundle only the dispatcher (libvpl.dll) into bin/.
+# For win64 we MinGW-cross the dispatcher and static-link libgcc/libstdc++ so the
+# DLL is self-contained (needs only libwinpthread-1.dll, already shipped). Keep the
+# dispatcher (build) and the GPU runtime (image/driver) in lockstep.
 # ---------------------------------------------------------------------------
 RUN . /env.sh && set -eux \
- && if [ "$BUILD_TARGET" = "x86_64" ]; then \
+ && if [ "$BUILD_TARGET" = "x86_64" ] || [ "$BUILD_TARGET" = "win64" ]; then \
       wget -q \
         "https://github.com/intel/libvpl/archive/refs/tags/v${VPL_VER}.tar.gz" \
         -O libvpl-${VPL_VER}.tar.gz \
       && tar xf libvpl-${VPL_VER}.tar.gz && cd libvpl-${VPL_VER} \
-      && cmake -B _build \
+      && VPL_CROSS="" \
+      && if [ "$BUILD_TARGET" = "win64" ]; then \
+           export CFLAGS="$CFLAGS -static-libgcc"; \
+           export CXXFLAGS="$CXXFLAGS -static-libgcc -static-libstdc++"; \
+           export LDFLAGS="$LDFLAGS -static-libgcc -static-libstdc++"; \
+           VPL_CROSS="-DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+             -DCMAKE_C_COMPILER=${TARGET_TRIPLE}-gcc \
+             -DCMAKE_CXX_COMPILER=${TARGET_TRIPLE}-g++ \
+             -DCMAKE_RC_COMPILER=${TARGET_TRIPLE}-windres \
+             -DCMAKE_AR=/usr/bin/${TARGET_TRIPLE}-ar \
+             -DCMAKE_RANLIB=/usr/bin/${TARGET_TRIPLE}-ranlib \
+             -DCMAKE_FIND_ROOT_PATH=${SYSROOT} \
+             -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+             -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+             -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY"; \
+         fi \
+      && cmake -B _build $VPL_CROSS \
            -DCMAKE_INSTALL_PREFIX=${SYSROOT} \
            -DCMAKE_BUILD_TYPE=Release \
            -DBUILD_SHARED_LIBS=ON \
@@ -681,6 +702,7 @@ RUN . /env.sh && set -eux \
            -DINSTALL_EXAMPLES=OFF \
       && make -C _build -j$(nproc) \
       && make -C _build install \
+      && echo "=== vpl.pc (installed) ===" && cat ${SYSROOT}/lib/pkgconfig/vpl.pc \
       && cd /build && rm -rf libvpl-*; \
     fi
 
@@ -831,6 +853,10 @@ RUN . /env.sh && set -eux \
       find ${FFMPEG_PREFIX}/bin -name '*.dll' \
            -exec ${STRIP} --strip-unneeded {} \;; \
       cp /usr/x86_64-w64-mingw32/lib/libwinpthread-1.dll ${FFMPEG_PREFIX}/bin/; \
+      VPLDLL=$(find ${SYSROOT}/bin ${SYSROOT}/lib -maxdepth 1 -iname 'libvpl*.dll' 2>/dev/null | head -1); \
+      [ -n "$VPLDLL" ] || { echo "ERROR: libvpl.dll missing from sysroot after build — QSV would silently fail"; ls -la ${SYSROOT}/bin ${SYSROOT}/lib 2>/dev/null || true; exit 1; }; \
+      cp "$VPLDLL" ${FFMPEG_PREFIX}/bin/; \
+      ${STRIP} --strip-unneeded "${FFMPEG_PREFIX}/bin/$(basename "$VPLDLL")" || true; \
     else \
       ${STRIP} ${FFMPEG_PREFIX}/bin/ffmpeg; \
       find ${FFMPEG_PREFIX}/lib -name '*.so.*' \
