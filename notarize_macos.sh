@@ -59,6 +59,22 @@ echo "✅ Version: ${VERSION}"
 echo
 
 OUT_DIR="${SCRIPT_DIR}/out"
+mkdir -p "${OUT_DIR}"
+
+# --- Optionally fetch fresh CI-built zips from the GitHub release ---
+# The CI workflows attach ffmpeg<ver>-macos-{arm64,x86_64}.zip to the v<ver>
+# release. Downloading here guarantees we sign the latest build rather than
+# whatever stale zips are lying around in out/ from a previous run.
+RELEASE_URL="https://github.com/ispysoftware/agentdvr-ffmpeg-build/releases/download/v${VERSION}"
+read -p "Download fresh zips from GitHub release v${VERSION} (overwrites out/) [Y/n]: " FETCH
+if [[ ! "${FETCH}" =~ ^[Nn]$ ]]; then
+    for arch in arm64 x86_64; do
+        [ -n "${ARCH_FILTER}" ] && [ "${arch}" != "${ARCH_FILTER}" ] && continue
+        NAME="ffmpeg${VERSION}-macos-${arch}.zip"
+        echo "⬇️  ${NAME}"
+        curl -fL --retry 3 --retry-delay 5 -o "${OUT_DIR}/${NAME}" "${RELEASE_URL}/${NAME}"
+    done
+fi
 
 # Build list of zips to process
 ZIPS=()
@@ -144,3 +160,20 @@ for ZIP in "${ZIPS[@]}"; do
     echo "    out/${BASENAME}-notarized.zip"
 done
 echo "================================================="
+
+# --- Optionally upload the notarized zips back to the GitHub release ---
+# Requires the gh CLI, authenticated (gh auth login). --clobber replaces the
+# existing -notarized assets on the release in place.
+if command -v gh >/dev/null 2>&1; then
+    read -p "Upload notarized zips to GitHub release v${VERSION} (replaces existing) [Y/n]: " UPLOAD
+    if [[ ! "${UPLOAD}" =~ ^[Nn]$ ]]; then
+        for ZIP in "${ZIPS[@]}"; do
+            BASENAME="$(basename "${ZIP}" .zip)"
+            gh release upload "v${VERSION}" "${OUT_DIR}/${BASENAME}-notarized.zip" \
+                --repo ispysoftware/agentdvr-ffmpeg-build --clobber
+            echo "✅ Uploaded ${BASENAME}-notarized.zip"
+        done
+    fi
+else
+    echo "ℹ️  gh CLI not found — upload the -notarized.zip files to the release manually."
+fi
