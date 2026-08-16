@@ -366,7 +366,7 @@ cd ffmpeg-${FFMPEG_VER}
 for pf in "${SCRIPT_DIR}"/patches/*.patch; do
     [ -e "$pf" ] || continue
     echo "    applying $(basename "$pf")"
-    sed 's/\r$//' "$pf" | patch -p1
+    sed 's/\r$//' "$pf" | patch -p1 --fuzz=0
 done
 
 ./configure \

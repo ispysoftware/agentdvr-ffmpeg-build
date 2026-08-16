@@ -791,7 +791,7 @@ RUN . /env.sh && set -eux \
  && for pf in /patches/*.patch; do \
       [ -e "$pf" ] || continue; \
       echo "=== applying $(basename "$pf") ==="; \
-      sed 's/\r$//' "$pf" | patch -p1; \
+      sed 's/\r$//' "$pf" | patch -p1 --fuzz=0; \
     done \
  \
  && CROSS_COMPILE_FLAGS="" \
