@@ -11,6 +11,7 @@
 
 # Shell / Docker / CI — MUST be LF
 Dockerfile        text eol=lf
+*.patch           text eol=lf
 *.sh              text eol=lf
 *.sh.example      text eol=lf
 *.bash            text eol=lf

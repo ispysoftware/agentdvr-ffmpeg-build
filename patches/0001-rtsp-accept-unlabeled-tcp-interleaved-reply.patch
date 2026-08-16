@@ -1,0 +1,42 @@
+diff --git a/libavformat/rtsp.c b/libavformat/rtsp.c
+index 6da03d2..08dbf59 100644
+--- a/libavformat/rtsp.c
++++ b/libavformat/rtsp.c
+@@ -960,6 +960,8 @@ static void rtsp_parse_transport(AVFormatContext *s,
+     reply->nb_transports = 0;
+ 
+     for (;;) {
++        int interleaved_seen = 0;
++
+         p += strspn(p, SPACE_CHARS);
+         if (*p == '\0')
+             break;
+@@ -1027,6 +1029,7 @@ static void rtsp_parse_transport(AVFormatContext *s,
+                     p++;
+                     rtsp_parse_range(&th->interleaved_min,
+                                      &th->interleaved_max, &p);
++                    interleaved_seen = 1;
+                 }
+             } else if (!strcmp(parameter, "multicast")) {
+                 if (th->lower_transport == RTSP_LOWER_TRANSPORT_UDP)
+@@ -1068,6 +1071,20 @@ static void rtsp_parse_transport(AVFormatContext *s,
+         if (*p == ',')
+             p++;
+ 
++        /* Some buggy camera firmwares reply to a TCP SETUP request with a
++         * Transport header that omits the lower transport but still carries
++         * an interleaved= channel parameter, e.g.
++         *   Transport: RTP/AVP;unicast;interleaved=0-1
++         * Per RFC 2326 the lower transport defaults to UDP, so this parses
++         * as UDP and the SETUP handshake fails with "Nonmatching transport
++         * in server reply" even though the reply is functionally a valid
++         * TCP-interleaved answer. An interleaved channel is only meaningful
++         * on TCP, so treat such replies as TCP. */
++        if (th->transport == RTSP_TRANSPORT_RTP &&
++            th->lower_transport == RTSP_LOWER_TRANSPORT_UDP &&
++            !lower_transport[0] && interleaved_seen)
++            th->lower_transport = RTSP_LOWER_TRANSPORT_TCP;
++
+         reply->nb_transports++;
+         if (reply->nb_transports >= RTSP_MAX_TRANSPORTS)
+             break;

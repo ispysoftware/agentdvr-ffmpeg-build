@@ -361,6 +361,14 @@ echo "==> FFmpeg ${FFMPEG_VER}"
 curl -fsSL --retry 3 --retry-delay 5 "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER}.tar.xz" | tar xJ
 cd ffmpeg-${FFMPEG_VER}
 
+# Apply local patches (patches/*.patch, -p1, in order — keep in sync with
+# the Dockerfile). sed strips CRLF in case a Windows checkout mangled them.
+for pf in "${SCRIPT_DIR}"/patches/*.patch; do
+    [ -e "$pf" ] || continue
+    echo "    applying $(basename "$pf")"
+    sed 's/\r$//' "$pf" | patch -p1
+done
+
 ./configure \
     --prefix="${FFMPEG_PREFIX}" \
     \

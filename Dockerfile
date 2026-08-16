@@ -763,6 +763,12 @@ RUN . /env.sh && set -eux \
 # ============================================================================
 # FFmpeg  —  GPL 3+  ·  shared libraries
 # ============================================================================
+# Local source patches (patches/*.patch, applied with -p1 in order).
+# 0001: accept TCP-interleaved SETUP replies whose Transport header omits the
+#       explicit /TCP token (cheap OEM firmwares) — otherwise ffmpeg fails
+#       with "Nonmatching transport in server reply".
+COPY patches/ /patches/
+
 RUN . /env.sh && set -eux \
  && wget -q "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER}.tar.xz" \
  && tar xf ffmpeg-${FFMPEG_VER}.tar.xz \
@@ -780,6 +786,14 @@ RUN . /env.sh && set -eux \
     fi \
  \
  && cd ffmpeg-${FFMPEG_VER} \
+ \
+ # Apply local patches — sed strips CRLF in case a Windows checkout mangled them
+ && for pf in /patches/*.patch; do \
+      [ -e "$pf" ] || continue; \
+      echo "=== applying $(basename "$pf") ==="; \
+      sed 's/\r$//' "$pf" | patch -p1; \
+    done \
+ \
  && CROSS_COMPILE_FLAGS="" \
  && if [ "$IS_CROSS" = "1" ]; then \
       CROSS_COMPILE_FLAGS="--cross-prefix=${TARGET_TRIPLE}- --enable-cross-compile --target-os=${FF_OS}"; \
