@@ -18,3 +18,6 @@ out/
 # Apple notarization credentials — NEVER commit.
 sign_pwd.txt
 notarize_config.sh
+
+# R2 credentials for publish_cdn.py — NEVER commit.
+cdn_config.json

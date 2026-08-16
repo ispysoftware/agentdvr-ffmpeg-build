@@ -6,7 +6,7 @@
 #         .\build.ps1 -Arch win64
 #         .\build.ps1 -Arch both            # x64 + arm64
 #         .\build.ps1 -Arch all             # x64 + arm64 + armhf + win64
-#         .\build.ps1 -Arch x64 -FfmpegVer 8.1 -OutDir .\out
+#         .\build.ps1 -Arch x64 -FfmpegVer 9.0.1 -OutDir .\out
 #         .\build.ps1 -Arch arm64 -NoCache
 #
 # NOTE: --progress=plain is built in; do not pass it on the command line.
@@ -17,7 +17,7 @@
 param(
     [ValidateSet("armhf","arm64","x64","win64","both","all")]
     [string]$Arch        = "",
-    [string]$FfmpegVer   = "8.1",
+    [string]$FfmpegVer   = "9.0.1",
     [string]$OutDir      = "$PSScriptRoot\out",
     [string]$ImageTag    = "",      # auto-derived from Arch if empty
     [ValidateSet("plain","auto")]
@@ -40,7 +40,7 @@ if ($Arch -eq "") {
     Write-Host "  all     x64 + arm64 + armhf + win64"
     Write-Host ""
     Write-Host "Options:"
-    Write-Host "  -FfmpegVer <ver>       FFmpeg version                (default: 8.1)"
+    Write-Host "  -FfmpegVer <ver>       FFmpeg version                (default: 9.0.1)"
     Write-Host "  -OutDir    <path>      Output directory              (default: .\out)"
     Write-Host "  -Progress  plain|auto  Docker build output verbosity (default: plain)"
     Write-Host "  -NoCache               Force full rebuild (no Docker layer cache)"
@@ -48,7 +48,7 @@ if ($Arch -eq "") {
     Write-Host "Examples:"
     Write-Host "  .\build.ps1 -Arch x64"
     Write-Host "  .\build.ps1 -Arch win64"
-    Write-Host "  .\build.ps1 -Arch all -FfmpegVer 8.1"
+    Write-Host "  .\build.ps1 -Arch all -FfmpegVer 9.0.1"
     Write-Host ""
     exit 0
 }

@@ -49,9 +49,9 @@ APP_PASSWORD="$(cat "${SIGN_PWD_FILE}" | tr -d '[:space:]')"
 VERSION="${1:-}"
 ARCH_FILTER="${2:-}"  # optional: arm64 or x86_64
 
-read -p "Please enter the FFmpeg version to notarize [default: 8.1]: " INPUT_VER
-VERSION="${INPUT_VER:-${VERSION:-8.1}}"
-if [[ ! "$VERSION" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+read -p "Please enter the FFmpeg version to notarize [default: 9.0.1]: " INPUT_VER
+VERSION="${INPUT_VER:-${VERSION:-9.0.1}}"
+if [[ ! "$VERSION" =~ ^[0-9]+([.][0-9]+){0,2}$ ]]; then
     echo "Invalid FFmpeg version."
     exit 1
 fi

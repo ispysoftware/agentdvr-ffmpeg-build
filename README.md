@@ -1,13 +1,13 @@
 # AgentDVR — FFmpeg cross-build
 
-Builds **FFmpeg 8.1 GPL shared libraries** from source for all platforms AgentDVR ships, targeting [FFmpeg.AutoGen 8.1](https://github.com/Ruslan-B/FFmpeg.AutoGen). Linux and Windows builds run inside Docker on any x86_64 machine; macOS builds run natively on the target architecture.
+Builds **FFmpeg 9.0.1 GPL shared libraries** from source for all platforms AgentDVR ships, targeting [FFmpeg.AutoGen 9.0.1](https://github.com/Ruslan-B/FFmpeg.AutoGen). Linux and Windows builds run inside Docker on any x86_64 machine; macOS builds run natively on the target architecture.
 
 ## Why this exists
 
 FFmpeg.AutoGen loads FFmpeg's shared libraries at runtime via P/Invoke. The libraries must be:
 
-- **The right ABI version** — FFmpeg.AutoGen 8.1 expects the 8.1 ABI (avcodec 62, avformat 62, avutil 60, etc.).
-- **glibc 2.28-compatible** (Linux) — AgentDVR targets Debian 10 (Buster), Ubuntu 18.10+, RHEL 8+, and Raspberry Pi OS Buster.
+- **The right ABI version** — FFmpeg.AutoGen 9.0.1 expects the 9.0.1 ABI (avcodec 63, avformat 63, avutil 61, avfilter 12, swscale 10, swresample 7).
+- **glibc 2.28-compatible** (Linux) — AgentDVR targets Debian 10 (Buster), Ubuntu 19.0.10+, RHEL 8+, and Raspberry Pi OS Buster.
 - **Hardware-acceleration-enabled** — each platform needs its own HW accel flags; no single binary covers all.
 
 ## Targets
@@ -67,8 +67,8 @@ A few libraries can't be statically linked because they are runtime loaders that
 Pushing a version tag builds all six targets in parallel and attaches the archives to a GitHub Release automatically:
 
 ```powershell
-git tag v8.1
-git push origin v8.1
+git tag v9.0.1
+git push origin v9.0.1
 ```
 
 You can also trigger a single target manually from **Actions → Build FFmpeg → Run workflow** in the GitHub UI — useful for testing without burning minutes on all six jobs.
@@ -93,7 +93,7 @@ See [`.github/workflows/build.yml`](.github/workflows/build.yml) for the full wo
 .\build.ps1 -Arch all
 
 # Override FFmpeg version or output directory
-.\build.ps1 -Arch x64 -FfmpegVer 8.1 -OutDir .\dist
+.\build.ps1 -Arch x64 -FfmpegVer 9.0.1 -OutDir .\dist
 
 # Force a full rebuild (no Docker layer cache)
 .\build.ps1 -Arch x64 -NoCache
@@ -111,8 +111,8 @@ Run natively on the target architecture. The script installs any missing build t
 ./build_macos.sh
 
 # Override FFmpeg version or parallelism
-FFMPEG_VER=8.1 ./build_macos.sh
-FFMPEG_VER=8.1 JOBS=8 ./build_macos.sh
+FFMPEG_VER=9.0.1 ./build_macos.sh
+FFMPEG_VER=9.0.1 JOBS=8 ./build_macos.sh
 ```
 
 ## Outputs
@@ -121,15 +121,15 @@ FFMPEG_VER=8.1 JOBS=8 ./build_macos.sh
 
 ```
 out/
-  ffmpeg8.1-linux-armhf.tar.xz
-  ffmpeg8.1-linux-arm64.tar.xz
-  ffmpeg8.1-linux-x86_64.tar.xz
+  ffmpeg9.0.1-linux-armhf.tar.xz
+  ffmpeg9.0.1-linux-arm64.tar.xz
+  ffmpeg9.0.1-linux-x86_64.tar.xz
 ```
 
 The archive contains `/bin/ffmpeg` and `/lib/libav*.so.*`, `/lib/libsw*.so.*`. Extract with:
 
 ```bash
-sudo tar -xJf ffmpeg8.1-linux-arm64.tar.xz -C /usr/local && sudo ldconfig
+sudo tar -xJf ffmpeg9.0.1-linux-arm64.tar.xz -C /usr/local && sudo ldconfig
 ```
 
 The arm64 tarball also includes `librockchip_mpp.so` under `lib/`.
@@ -138,14 +138,14 @@ The arm64 tarball also includes `librockchip_mpp.so` under `lib/`.
 
 ```
 out/
-  ffmpeg8.1-windows-x64.7z
+  ffmpeg9.0.1-windows-x64.7z
 ```
 
 The archive contains only the 7 DLLs and `ffmpeg.exe` at the root. Drop them into your application directory alongside your `.exe` (or anywhere on `PATH`):
 
 ```
-avcodec-62.dll  avdevice-62.dll  avfilter-11.dll  avformat-62.dll
-avutil-60.dll   swresample-6.dll  swscale-9.dll    ffmpeg.exe
+avcodec-63.dll  avdevice-63.dll  avfilter-12.dll  avformat-63.dll
+avutil-61.dll   swresample-7.dll  swscale-10.dll   ffmpeg.exe
 ```
 
 FFmpeg.AutoGen discovers them automatically via `PATH` or the application directory.
@@ -154,14 +154,14 @@ FFmpeg.AutoGen discovers them automatically via `PATH` or the application direct
 
 ```
 out/
-  ffmpeg8.1-macos-arm64.tar.xz
-  ffmpeg8.1-macos-x86_64.tar.xz
+  ffmpeg9.0.1-macos-arm64.tar.xz
+  ffmpeg9.0.1-macos-x86_64.tar.xz
 ```
 
 The archive contains `/bin/ffmpeg` and `/lib/libav*.dylib`, `/lib/libsw*.dylib`. All dylib install names use `@rpath` so they can be loaded from any directory. Extract with:
 
 ```bash
-sudo tar -xJf ffmpeg8.1-macos-arm64.tar.xz -C /usr/local
+sudo tar -xJf ffmpeg9.0.1-macos-arm64.tar.xz -C /usr/local
 ```
 
 ## Build options
@@ -171,7 +171,7 @@ sudo tar -xJf ffmpeg8.1-macos-arm64.tar.xz -C /usr/local
 | Parameter    | Default  | Description                                            |
 |--------------|----------|--------------------------------------------------------|
 | `-Arch`      | *(required)* | `armhf` / `arm64` / `x64` / `win64` / `both` / `all` |
-| `-FfmpegVer` | `8.1`    | FFmpeg release tag                                     |
+| `-FfmpegVer` | `9.0.1`    | FFmpeg release tag                                     |
 | `-OutDir`    | `.\out`  | Output directory                                       |
 | `-NoCache`   | off      | Force full rebuild (no Docker layer cache)             |
 
@@ -181,7 +181,7 @@ All dependency version pins are at the top of `Dockerfile` — bump them there t
 
 | Variable     | Default  | Description                                            |
 |--------------|----------|--------------------------------------------------------|
-| `FFMPEG_VER` | `8.1`    | FFmpeg release tag                                     |
+| `FFMPEG_VER` | `9.0.1`    | FFmpeg release tag                                     |
 | `JOBS`       | CPU count | Parallel make jobs                                    |
 
 All version pins are at the top of `build_macos.sh`.
@@ -213,7 +213,7 @@ https://files.ispyconnect.com/libs/ffmpeg/<version>/macos-x86_64.tar.xz
 
 To roll a new version:
 
-1. Push a version tag (e.g. `git tag v8.1 && git push origin v8.1`).
+1. Push a version tag (e.g. `git tag v9.0.1 && git push origin v9.0.1`).
 2. Wait for all six CI jobs to complete and attach their archives to the GitHub Release.
 3. Upload archives to the CDN under `libs/ffmpeg/<new-version>/`.
 4. Bump the version constant in `Dependencies.cs`.
@@ -255,7 +255,7 @@ Verify inside the running container with `vainfo --display drm --device /dev/dri
 > **NVIDIA is the opposite model** — install nothing in the image. The host driver is injected by the [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-container-toolkit) (`--gpus all`), which bind-mounts `libnvcuvid` / `libnvidia-encode` matching the host driver version. Installing NVIDIA userspace libs in the image breaks this.
 
 **win64 DLLs not found by FFmpeg.AutoGen.**  
-Put the DLLs in the same directory as the application `.exe`, or anywhere on `PATH`. FFmpeg.AutoGen calls `LoadLibrary` with bare names (`avcodec-62.dll` etc.) — the Windows loader resolves from the application directory first.
+Put the DLLs in the same directory as the application `.exe`, or anywhere on `PATH`. FFmpeg.AutoGen calls `LoadLibrary` with bare names (`avcodec-63.dll` etc.) — the Windows loader resolves from the application directory first.
 
 **macOS dylibs not found at runtime.**  
 Ensure the `lib/` directory is on the rpath of your application. All dylibs use `@rpath/<name>` install names — add the lib directory with `install_name_tool -add_rpath <path> <your-binary>` or set `DYLD_LIBRARY_PATH` for testing.

@@ -13,10 +13,10 @@
 # always available — no driver install required on the target machine).
 #
 # Usage:
-#   ./build_macos.sh                              # native arch, FFmpeg 8.1
-#   FFMPEG_VER=8.1 ./build_macos.sh
+#   ./build_macos.sh                              # native arch, FFmpeg 9.0.1
+#   FFMPEG_VER=9.0.1 ./build_macos.sh
 #   TARGET_ARCH=x86_64 ./build_macos.sh           # cross-compile for x86_64
-#   FFMPEG_VER=8.1 JOBS=8 ./build_macos.sh
+#   FFMPEG_VER=9.0.1 JOBS=8 ./build_macos.sh
 #
 # Output:
 #   out/ffmpeg<ver>-macos-arm64.tar.xz
@@ -28,7 +28,7 @@ set -euo pipefail
 # ============================================================================
 # Version pins — keep in sync with Dockerfile ARGs
 # ============================================================================
-FFMPEG_VER=${FFMPEG_VER:-8.1}
+FFMPEG_VER=${FFMPEG_VER:-9.0.1}
 ZLIB_VER=1.3.1
 BZIP2_VER=1.0.8
 XZ_VER=5.6.2
