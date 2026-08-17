@@ -224,6 +224,10 @@ case "$TARGET" in
     FF_HW="--enable-d3d11va --enable-dxva2 --enable-nvenc --enable-nvdec --enable-amf --enable-libvpl"
     FF_OS=mingw32
     FF_WIN_FLAGS="--enable-w32threads --windres=${TRIPLE}-windres"
+    # -static-libgcc: FFmpeg 9's libswscale (fp16/int128 helpers) emits calls
+    # into GCC's support runtime; linked shared that makes swscale-10.dll
+    # depend on libgcc_s_seh-1.dll, which target machines don't have.
+    FF_EXTRA_LDFLAGS="-static-libgcc"
     EXTRA_LIBS=""
     # -fstack-protector-strong on MinGW requires libssp for __stack_chk_fail/__stack_chk_guard.
     # Omit it for the win64 cross-build so statically-linked deps (dav1d etc.) don't
@@ -303,6 +307,7 @@ export FF_EXTRA_FLAGS="${FF_EXTRA}"
 export FF_HW_FLAGS="${FF_HW}"
 export FF_OS="${FF_OS}"
 export FF_WIN_FLAGS="${FF_WIN_FLAGS}"
+export FF_EXTRA_LDFLAGS="${FF_EXTRA_LDFLAGS}"
 export EXTRA_LIBS="${EXTRA_LIBS}"
 export HOST_FLAG="${HOST_FLAG}"
 ENV
@@ -810,7 +815,7 @@ RUN . /env.sh && set -eux \
       --pkg-config-flags="--static" \
       \
       --extra-cflags="${CFLAGS} -I${SYSROOT}/include" \
-      --extra-ldflags="-L${SYSROOT}/lib" \
+      --extra-ldflags="-L${SYSROOT}/lib ${FF_EXTRA_LDFLAGS}" \
       --extra-libs="${EXTRA_LIBS}" \
       \
       --enable-shared \
@@ -871,6 +876,14 @@ RUN . /env.sh && set -eux \
       [ -n "$VPLDLL" ] || { echo "ERROR: libvpl.dll missing from sysroot after build — QSV would silently fail"; ls -la ${SYSROOT}/bin ${SYSROOT}/lib 2>/dev/null || true; exit 1; }; \
       cp "$VPLDLL" ${FFMPEG_PREFIX}/bin/; \
       ${STRIP} --strip-unneeded "${FFMPEG_PREFIX}/bin/$(basename "$VPLDLL")" || true; \
+      # Guard: no output binary may import GCC's shared runtime — target
+      # machines don't have it. Regresses if -static-libgcc is ever dropped.
+      for f in ${FFMPEG_PREFIX}/bin/*.dll ${FFMPEG_PREFIX}/bin/ffmpeg.exe; do \
+        if grep -q "libgcc_s_seh" "$f"; then \
+          echo "ERROR: $(basename "$f") imports libgcc_s_seh-1.dll — -static-libgcc regressed"; \
+          exit 1; \
+        fi; \
+      done; \
     else \
       ${STRIP} ${FFMPEG_PREFIX}/bin/ffmpeg; \
       find ${FFMPEG_PREFIX}/lib -name '*.so.*' \
