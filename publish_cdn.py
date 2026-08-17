@@ -102,13 +102,21 @@ def purge_cloudflare(zone_id, api_token, urls, timeout=60):
         raise RuntimeError(f"Cloudflare purge failed: {result.get('errors')}")
 
 
-def head_size(url, timeout=60):
-    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "publish_cdn"})
+def probe_public(url, timeout=60):
+    """Ranged GET through the public URL — same cache path real downloaders hit.
+    (HEAD is useless here: Cloudflare can serve HEAD from origin while GET
+    serves stale cached bytes, which made verification pass on a stale edge.)
+    Returns (total_size, first_bytes)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "publish_cdn",
+                                               "Range": "bytes=0-1023"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return int(resp.headers.get("Content-Length") or -1)
+            data = resp.read()
+            crange = resp.headers.get("Content-Range", "")  # "bytes 0-1023/18656649"
+            total = int(crange.rsplit("/", 1)[1]) if "/" in crange else -1
+            return total, data
     except Exception:
-        return -1
+        return -1, b""
 
 
 def main():
@@ -181,16 +189,19 @@ def main():
     else:
         print("==> Skipping edge cache purge (CF_ZONE_ID / CF_API_TOKEN not set)")
 
-    print("==> Verifying via public URL")
+    print("==> Verifying via public URL (ranged GET through the edge cache)")
     stale = False
-    for _, name, _, size in files:
-        public = head_size(f"{PUBLIC_URL}/{name}")
-        ok = public == size
+    for dest, name, _, size in files:
+        public, first = probe_public(f"{PUBLIC_URL}/{name}")
+        with open(dest, "rb") as f:
+            local_first = f.read(len(first) or 1024)
+        ok = public == size and first == local_first[:len(first)] and len(first) > 0
         stale |= not ok
-        print(f"    {name}  cdn={public} local={size}  {'OK' if ok else 'MISMATCH'}")
+        print(f"    {name}  cdn={public} local={size}  {'OK' if ok else 'STALE/MISMATCH'}")
     if stale:
-        print("WARNING: size mismatch -- Cloudflare may be serving a cached copy. "
-              "Purge the cache for files.ispyconnect.com/libs/* and re-check.")
+        sys.exit("ERROR: public URL serving stale or wrong bytes -- purge the "
+                 "Cloudflare cache for files.ispyconnect.com/libs/* and re-run. "
+                 "(Set CF_ZONE_ID / CF_API_TOKEN to purge automatically.)")
     print("Done.")
 
 
