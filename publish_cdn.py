@@ -88,6 +88,20 @@ def download(url, dest, timeout=300):
     return os.path.getsize(dest)
 
 
+def purge_cloudflare(zone_id, api_token, urls, timeout=60):
+    """Purge specific URLs from the Cloudflare edge cache (works on all plans)."""
+    body = json.dumps({"files": urls}).encode()
+    req = urllib.request.Request(
+        f"https://api.cloudflare.com/client/v4/zones/{zone_id}/purge_cache",
+        data=body, method="POST",
+        headers={"Authorization": f"Bearer {api_token}",
+                 "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        result = json.loads(resp.read())
+    if not result.get("success"):
+        raise RuntimeError(f"Cloudflare purge failed: {result.get('errors')}")
+
+
 def head_size(url, timeout=60):
     req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "publish_cdn"})
     try:
@@ -154,6 +168,18 @@ def main():
     for dest, name, ctype, size in files:
         status, etag = upload(r2, dest, f"libs/{name}", ctype)
         print(f"    libs/{name}  status={status} etag={etag}")
+
+    # Purge the replaced URLs from the Cloudflare edge cache so the verification
+    # below (and every downloader) sees the new files immediately. Optional:
+    # skipped when CF_ZONE_ID / CF_API_TOKEN (or config keys) are absent.
+    cf_zone = os.environ.get("CF_ZONE_ID") or r2.get("cf_zone_id", "")
+    cf_token = os.environ.get("CF_API_TOKEN") or r2.get("cf_api_token", "")
+    if cf_zone and cf_token:
+        print("==> Purging Cloudflare edge cache")
+        purge_cloudflare(cf_zone, cf_token, [f"{PUBLIC_URL}/{name}" for _, name, _, _ in files])
+        print("    purged", len(files), "URLs")
+    else:
+        print("==> Skipping edge cache purge (CF_ZONE_ID / CF_API_TOKEN not set)")
 
     print("==> Verifying via public URL")
     stale = False

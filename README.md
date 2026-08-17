@@ -100,6 +100,10 @@ archives (three Linux, Windows, both notarized macOS zips) it runs
 `publish_cdn.py` to upload them to Cloudflare R2 under `libs/` — the URLs
 Agent DVR's FindFFmpeg requests. Requires secrets `R2_SERVICE_URL`,
 `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`; skipped if absent.
+Optionally add `CF_ZONE_ID` (ispyconnect.com zone) and `CF_API_TOKEN`
+(scoped to Zone → Cache Purge only) to purge the replaced URLs from the
+Cloudflare edge cache immediately after upload — otherwise replaced files
+may serve stale from edge nodes until their cache TTL expires.
 Can also be run manually (Actions → Publish CDN → Run workflow → tag) to
 publish an existing release.
 
