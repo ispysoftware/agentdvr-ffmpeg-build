@@ -71,9 +71,37 @@ git tag v9.0.1
 git push origin v9.0.1
 ```
 
-You can also trigger a single target manually from **Actions → Build FFmpeg → Run workflow** in the GitHub UI — useful for testing without burning minutes on all six jobs.
+You can also trigger a single target manually from **Actions → Run workflow** in the GitHub UI — useful for testing without burning minutes on all six jobs.
 
-See [`.github/workflows/build.yml`](.github/workflows/build.yml) for the full workflow definition.
+Workflows: [`build-linux.yml`](.github/workflows/build-linux.yml), [`build-windows.yml`](.github/workflows/build-windows.yml), [`build-macos.yml`](.github/workflows/build-macos.yml), [`publish-cdn.yml`](.github/workflows/publish-cdn.yml).
+
+### Notarization in CI (Build macOS)
+
+On tag builds, the macOS jobs sign and notarize the freshly built zips on the
+runner and attach `ffmpeg<ver>-macos-<arch>-notarized.zip` to the release —
+no local Mac needed. Requires these repository secrets (Settings → Secrets and
+variables → Actions); if they are absent the notarize steps are skipped and
+only the unsigned zips are published (the local `notarize_macos.sh` flow still
+works as a fallback):
+
+| Secret | Value |
+|--------|-------|
+| `APPLE_CERT_P12` | base64 of the "Developer ID Application" certificate + private key exported as .p12 from Keychain Access (`base64 -i cert.p12 \| pbcopy`) |
+| `APPLE_CERT_PASSWORD` | password chosen when exporting the .p12 |
+| `APPLE_DEVELOPER_ID` | full signing identity, e.g. `Developer ID Application: THE PLAYFUL GROUP PTY LTD (5A2A6Q9QVJ)` |
+| `APPLE_ID` | Apple ID email |
+| `APPLE_TEAM_ID` | e.g. `5A2A6Q9QVJ` |
+| `APPLE_APP_PASSWORD` | app-specific password from appleid.apple.com |
+
+### Auto-publish to the CDN (publish-cdn.yml)
+
+Fires after each build workflow completes. Once the release has all six
+archives (three Linux, Windows, both notarized macOS zips) it runs
+`publish_cdn.py` to upload them to Cloudflare R2 under `libs/` — the URLs
+Agent DVR's FindFFmpeg requests. Requires secrets `R2_SERVICE_URL`,
+`R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`; skipped if absent.
+Can also be run manually (Actions → Publish CDN → Run workflow → tag) to
+publish an existing release.
 
 ## Building locally
 

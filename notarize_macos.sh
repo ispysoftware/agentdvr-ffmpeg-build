@@ -23,34 +23,48 @@ set -e
 # --- Configuration ---
 SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
 
-# Credentials are kept outside the repo in notarize_config.sh (gitignored).
-# Copy notarize_config.sh.example to notarize_config.sh and fill it in.
-CONFIG_FILE="${SCRIPT_DIR}/notarize_config.sh"
-if [ ! -f "${CONFIG_FILE}" ]; then
-    echo "ERROR: ${CONFIG_FILE} not found."
-    echo "Copy notarize_config.sh.example to notarize_config.sh and fill in your credentials."
-    exit 1
+# Non-interactive mode (CI): auto-detected when there is no tty or $CI is set.
+# No prompts; version comes from $1 / FFMPEG_VER; zips are expected in out/
+# already (freshly built); no fetch from or upload to the GitHub release.
+if [ -n "${CI:-}" ] || [ ! -t 0 ]; then
+    NONINTERACTIVE=1
 fi
-# shellcheck source=notarize_config.sh.example
-# Strip Windows CRLF line endings before sourcing (in case edited on Windows)
-sed -i '' 's/\r//' "${CONFIG_FILE}"
-source "${CONFIG_FILE}"
 
-# App-specific password — read from sign_pwd.txt, never hardcoded.
-SIGN_PWD_FILE="${SCRIPT_DIR}/sign_pwd.txt"
-if [ ! -f "${SIGN_PWD_FILE}" ]; then
-    echo "ERROR: ${SIGN_PWD_FILE} not found."
-    echo "Create it containing your app-specific password from appleid.apple.com."
-    exit 1
+# Credentials: from env (CI secrets: DEVELOPER_ID, APPLE_ID, TEAM_ID) if set,
+# otherwise from the gitignored notarize_config.sh next to this script.
+if [ -z "${DEVELOPER_ID:-}" ] || [ -z "${APPLE_ID:-}" ] || [ -z "${TEAM_ID:-}" ]; then
+    CONFIG_FILE="${SCRIPT_DIR}/notarize_config.sh"
+    if [ ! -f "${CONFIG_FILE}" ]; then
+        echo "ERROR: ${CONFIG_FILE} not found and DEVELOPER_ID/APPLE_ID/TEAM_ID not set."
+        echo "Copy notarize_config.sh.example to notarize_config.sh and fill in your credentials."
+        exit 1
+    fi
+    # shellcheck source=notarize_config.sh.example
+    # Strip Windows CRLF line endings before sourcing (in case edited on Windows)
+    sed -i '' 's/\r//' "${CONFIG_FILE}"
+    source "${CONFIG_FILE}"
 fi
-APP_PASSWORD="$(cat "${SIGN_PWD_FILE}" | tr -d '[:space:]')"
+
+# App-specific password — env var (CI secret) or sign_pwd.txt, never hardcoded.
+if [ -z "${APP_PASSWORD:-}" ]; then
+    SIGN_PWD_FILE="${SCRIPT_DIR}/sign_pwd.txt"
+    if [ ! -f "${SIGN_PWD_FILE}" ]; then
+        echo "ERROR: ${SIGN_PWD_FILE} not found and APP_PASSWORD not set."
+        echo "Create it containing your app-specific password from appleid.apple.com."
+        exit 1
+    fi
+    APP_PASSWORD="$(cat "${SIGN_PWD_FILE}" | tr -d '[:space:]')"
+fi
 
 # --- Arguments ---
 VERSION="${1:-}"
 ARCH_FILTER="${2:-}"  # optional: arm64 or x86_64
 
-read -p "Please enter the FFmpeg version to notarize [default: 9.0.1]: " INPUT_VER
-VERSION="${INPUT_VER:-${VERSION:-9.0.1}}"
+INPUT_VER=""
+if [ -z "${NONINTERACTIVE:-}" ]; then
+    read -p "Please enter the FFmpeg version to notarize [default: 9.0.1]: " INPUT_VER
+fi
+VERSION="${INPUT_VER:-${VERSION:-${FFMPEG_VER:-9.0.1}}}"
 if [[ ! "$VERSION" =~ ^[0-9]+([.][0-9]+){0,2}$ ]]; then
     echo "Invalid FFmpeg version."
     exit 1
@@ -66,7 +80,10 @@ mkdir -p "${OUT_DIR}"
 # release. Downloading here guarantees we sign the latest build rather than
 # whatever stale zips are lying around in out/ from a previous run.
 RELEASE_URL="https://github.com/ispysoftware/agentdvr-ffmpeg-build/releases/download/v${VERSION}"
-read -p "Download fresh zips from GitHub release v${VERSION} (overwrites out/) [Y/n]: " FETCH
+FETCH="n"
+if [ -z "${NONINTERACTIVE:-}" ]; then
+    read -p "Download fresh zips from GitHub release v${VERSION} (overwrites out/) [Y/n]: " FETCH
+fi
 if [[ ! "${FETCH}" =~ ^[Nn]$ ]]; then
     for arch in arm64 x86_64; do
         [ -n "${ARCH_FILTER}" ] && [ "${arch}" != "${ARCH_FILTER}" ] && continue
@@ -164,7 +181,9 @@ echo "================================================="
 # --- Optionally upload the notarized zips back to the GitHub release ---
 # Requires the gh CLI, authenticated (gh auth login). --clobber replaces the
 # existing -notarized assets on the release in place.
-if command -v gh >/dev/null 2>&1; then
+if [ -n "${NONINTERACTIVE:-}" ]; then
+    echo "ℹ️  Non-interactive mode — skipping release upload (CI publishes assets itself)."
+elif command -v gh >/dev/null 2>&1; then
     read -p "Upload notarized zips to GitHub release v${VERSION} (replaces existing) [Y/n]: " UPLOAD
     if [[ ! "${UPLOAD}" =~ ^[Nn]$ ]]; then
         for ZIP in "${ZIPS[@]}"; do

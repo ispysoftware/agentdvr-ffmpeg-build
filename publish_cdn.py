@@ -110,11 +110,24 @@ def main():
         with open(os.path.join(HERE, "ffmpeg_version.txt"), encoding="utf-8") as f:
             ver = f.read().strip()
 
-    if not os.path.isfile(args.config):
+    # Credentials: env vars (CI secrets) take precedence over the config file.
+    if os.environ.get("R2_ACCESS_KEY_ID"):
+        r2 = {
+            "service_url": os.environ.get("R2_SERVICE_URL", ""),
+            "bucket": os.environ.get("R2_BUCKET", "agentfiles"),
+            "access_key_id": os.environ["R2_ACCESS_KEY_ID"],
+            "secret_access_key": os.environ.get("R2_SECRET_ACCESS_KEY", ""),
+        }
+        if not r2["service_url"] or not r2["secret_access_key"]:
+            sys.exit("ERROR: R2_SERVICE_URL and R2_SECRET_ACCESS_KEY must be set "
+                     "alongside R2_ACCESS_KEY_ID.")
+    elif not os.path.isfile(args.config):
         sys.exit(f"ERROR: config not found: {args.config}\n"
-                 "Create cdn_config.json (see module docstring) or pass --config.")
-    with open(args.config, encoding="utf-8") as f:
-        r2 = json.load(f)["r2"]
+                 "Create cdn_config.json (see module docstring), pass --config, "
+                 "or set R2_* environment variables.")
+    else:
+        with open(args.config, encoding="utf-8") as f:
+            r2 = json.load(f)["r2"]
 
     work = os.path.join(HERE, "out", "cdn")
     os.makedirs(work, exist_ok=True)

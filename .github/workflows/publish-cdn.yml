@@ -1,0 +1,85 @@
+name: Publish CDN
+
+# Runs whenever any build workflow finishes. Publishes the release archives to
+# Cloudflare R2 (files.ispyconnect.com/libs/) only once ALL six assets exist on
+# the release -- including the -notarized macOS zips produced by Build macOS.
+# Each build completion retriggers the check, so the last one to finish is the
+# one that actually publishes. Uploads are idempotent PUTs, and the concurrency
+# group prevents two runs from racing.
+
+on:
+  workflow_run:
+    workflows: ["Build Linux", "Build macOS", "Build Windows"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (e.g. v9.0.1)'
+        required: true
+
+concurrency:
+  group: publish-cdn
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Tag-triggered build runs report the tag name as head_branch.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    env:
+      HAVE_R2_SECRETS: ${{ secrets.R2_ACCESS_KEY_ID != '' && '1' || '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "val=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "val=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check all release assets are present
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.tag.outputs.val }}"
+          VER="${TAG#v}"
+          NAMES=$(gh release view "$TAG" --json assets -q '.assets[].name' || true)
+          MISSING=0
+          for f in \
+            "ffmpeg${VER}-linux-armhf.tar.xz" \
+            "ffmpeg${VER}-linux-arm64.tar.xz" \
+            "ffmpeg${VER}-linux-x86_64.tar.xz" \
+            "ffmpeg${VER}-windows-x64.zip" \
+            "ffmpeg${VER}-macos-arm64-notarized.zip" \
+            "ffmpeg${VER}-macos-x86_64-notarized.zip"; do
+            if ! grep -qxF "$f" <<< "$NAMES"; then
+              echo "still missing: $f"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" = "1" ]; then
+            echo "complete=0" >> "$GITHUB_OUTPUT"
+            echo "Not all assets present yet -- a later build completion will retrigger this check."
+          else
+            echo "complete=1" >> "$GITHUB_OUTPUT"
+            echo "All assets present."
+          fi
+
+      - name: Publish to Cloudflare R2
+        if: steps.check.outputs.complete == '1' && env.HAVE_R2_SECRETS == '1'
+        env:
+          TAG: ${{ steps.tag.outputs.val }}
+          R2_SERVICE_URL: ${{ secrets.R2_SERVICE_URL }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python3 publish_cdn.py --version "${TAG#v}" --yes

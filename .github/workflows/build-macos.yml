@@ -27,6 +27,8 @@ jobs:
 
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      # Notarization runs only when the Apple signing secrets are configured.
+      HAVE_APPLE_SECRETS: ${{ secrets.APPLE_CERT_P12 != '' && '1' || '' }}
 
     permissions:
       contents: write
@@ -62,6 +64,35 @@ jobs:
           FFMPEG_VER: ${{ steps.ver.outputs.val }}
           TARGET_ARCH: ${{ matrix.target_arch || matrix.arch }}
         run: bash ./build_macos.sh
+
+      - name: Import signing certificate
+        if: env.HAVE_APPLE_SECRETS == '1' && github.ref_type == 'tag'
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN_PWD=$(uuidgen)
+          security create-keychain -p "$KEYCHAIN_PWD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PWD" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          echo "$APPLE_CERT_P12" | base64 --decode > /tmp/cert.p12
+          security import /tmp/cert.p12 -k build.keychain -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          rm /tmp/cert.p12
+          # Allow codesign to use the key without a UI prompt (headless runner)
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PWD" build.keychain >/dev/null
+
+      - name: Sign and notarize
+        if: env.HAVE_APPLE_SECRETS == '1' && github.ref_type == 'tag'
+        env:
+          DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          FFMPEG_VER: ${{ steps.ver.outputs.val }}
+        # Non-interactive mode auto-detected (no tty): signs the freshly built
+        # zip in out/ and produces out/ffmpeg<ver>-macos-<arch>-notarized.zip.
+        run: ./notarize_macos.sh "${FFMPEG_VER}" "${{ matrix.arch }}"
 
       - name: Publish to GitHub Release
         if: github.ref_type == 'tag'
