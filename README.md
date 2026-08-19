@@ -270,7 +270,7 @@ https://files.ispyconnect.com/libs/ffmpeg<ver>[-lgpl]-windows-x64.zip
 https://files.ispyconnect.com/libs/ffmpeg<ver>[-lgpl]-macos-<arch>-notarized.zip
 ```
 
-The variant is selected by the `FFmpegGPL` server setting (default false = lgpl; pre-split installs are grandfathered to gpl).
+The variant is selected by the `FFmpegGPL` server setting (default false = lgpl for all installs, including upgrades from pre-split versions; the gpl build is only fetched on explicit user opt-in).
 
 To roll a new version:
 
