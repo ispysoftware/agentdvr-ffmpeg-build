@@ -1,6 +1,15 @@
 # AgentDVR — FFmpeg cross-build
 
-Builds **FFmpeg 9.0.1 GPL shared libraries** from source for all platforms AgentDVR ships, targeting [FFmpeg.AutoGen 9.0.1](https://github.com/Ruslan-B/FFmpeg.AutoGen). Linux and Windows builds run inside Docker on any x86_64 machine; macOS builds run natively on the target architecture.
+Builds **FFmpeg 9.0.1 shared libraries** from source for all platforms AgentDVR ships, targeting [FFmpeg.AutoGen 9.0.1](https://github.com/Ruslan-B/FFmpeg.AutoGen). Linux and Windows builds run inside Docker on any x86_64 machine; macOS builds run natively on the target architecture.
+
+Every platform is built in **two variants**:
+
+| Variant | Archive names | Licence of output | Software encoders |
+|---------|---------------|-------------------|-------------------|
+| `lgpl` *(AgentDVR's default download)* | `ffmpeg<ver>-lgpl-<os>-<arch>` | **LGPL v3** | OpenH264 (Linux targets); Windows/macOS use OS encoders (MediaFoundation / VideoToolbox) |
+| `gpl` *(user opt-in via AgentDVR settings)* | `ffmpeg<ver>-<os>-<arch>` (historical names) | **GPL v3** | libx264 (all targets) + libx265 (linux-x86_64) |
+
+The lgpl variant contains no GPL components and is safe to bundle directly with a closed-source application. The gpl variant adds the x264/x265 software encoders; AgentDVR downloads it only when the user enables **Software Encoders (FFmpeg GPL)** in server settings.
 
 ## Why this exists
 
@@ -27,18 +36,22 @@ FFmpeg.AutoGen loads FFmpeg's shared libraries at runtime via P/Invoke. The libr
 
 All dependencies are compiled statically into the FFmpeg `.so` / `.dylib` / `.dll` files — nothing extra to deploy alongside them. The two exceptions are the runtime loader libraries listed under [Bundled shared libraries](#bundled-shared-libraries-linux) below, which are shipped as `.so` files in the same directory.
 
-| Library     | Version | Licence     | Purpose                          |
-|-------------|---------|-------------|----------------------------------|
-| libx264     | stable  | GPL 2+      | H.264 encoder                    |
-| libvpx      | 1.14.1  | BSD         | VP8 / VP9 encoder + decoder      |
-| dav1d       | 1.4.1   | BSD         | AV1 decoder                      |
-| libopus     | 1.5.2   | BSD         | Opus audio codec                 |
-| libvorbis   | 1.3.7   | BSD         | Vorbis audio codec               |
-| libmp3lame  | 3.100   | LGPL 2      | MP3 encoder                      |
-| OpenSSL     | 3.4.1   | Apache 2.0  | HTTPS / RTMPS transport          |
-| zlib        | 1.3.1   | zlib        | Deflate (MKV/MP4 metadata)       |
-| bzip2       | 1.0.8   | BSD-like    | bzip2 demux                      |
-| liblzma/xz  | 5.6.2   | Public Domain | xz/lzma demux                  |
+| Library     | Version | Licence     | Variant | Purpose                          |
+|-------------|---------|-------------|---------|----------------------------------|
+| libx264     | stable  | GPL 2+      | gpl only | H.264 encoder                   |
+| libx265     | 4.2     | GPL 2+      | gpl only, linux-x86_64 | H.265 encoder     |
+| OpenH264    | 2.6.0   | BSD-2       | lgpl only, Linux targets | H.264 encoder (software fallback) |
+| libvpx      | 1.16.0  | BSD         | both    | VP8 / VP9 encoder + decoder      |
+| dav1d       | 1.5.4   | BSD         | both    | AV1 decoder                      |
+| libopus     | 1.6.1   | BSD         | both    | Opus audio codec                 |
+| libvorbis   | 1.3.7   | BSD         | both    | Vorbis audio codec               |
+| libmp3lame  | 3.100   | LGPL 2      | both    | MP3 encoder                      |
+| OpenSSL     | 3.5.7   | Apache 2.0  | both    | HTTPS / RTMPS transport          |
+| zlib        | 1.3.2   | zlib        | both    | Deflate (MKV/MP4 metadata)       |
+| bzip2       | 1.0.8   | BSD-like    | both    | bzip2 demux                      |
+| liblzma/xz  | 5.8.3   | Public Domain | both  | xz/lzma demux                    |
+
+Version pins live at the top of the `Dockerfile` (ARGs) and must be kept in sync manually with the pin block at the top of `build_macos.sh`.
 
 ### arm64 only
 
@@ -64,14 +77,16 @@ A few libraries can't be statically linked because they are runtime loaders that
 
 ## CI — GitHub Actions
 
-Pushing a version tag builds all six targets in parallel and attaches the archives to a GitHub Release automatically:
+Pushing a version tag builds all six targets **in both variants** (twelve jobs) in parallel and attaches the archives to a GitHub Release automatically:
 
 ```powershell
 git tag v9.0.1
 git push origin v9.0.1
 ```
 
-You can also trigger a single target manually from **Actions → Run workflow** in the GitHub UI — useful for testing without burning minutes on all six jobs.
+The tag name must be exactly `v<ffmpeg version>` — the workflows derive `FFMPEG_VER` from it. To republish an existing version (rebuilt binaries, new library pins), force-move the tag: `git tag -f v9.0.1 && git push origin v9.0.1 --force`.
+
+You can also trigger targets manually from **Actions → Run workflow** in the GitHub UI — dispatch runs upload workflow artifacts only (no release, no CDN), useful for testing.
 
 Workflows: [`build-linux.yml`](.github/workflows/build-linux.yml), [`build-windows.yml`](.github/workflows/build-windows.yml), [`build-macos.yml`](.github/workflows/build-macos.yml), [`publish-cdn.yml`](.github/workflows/publish-cdn.yml).
 
@@ -95,10 +110,11 @@ works as a fallback):
 
 ### Auto-publish to the CDN (publish-cdn.yml)
 
-Fires after each build workflow completes. Once the release has all six
-archives (three Linux, Windows, both notarized macOS zips) it runs
-`publish_cdn.py` to upload them to Cloudflare R2 under `libs/` — the URLs
-Agent DVR's FindFFmpeg requests. Requires secrets `R2_SERVICE_URL`,
+Fires after each build workflow completes. Once the release has all **twelve**
+archives (three Linux, Windows, both notarized macOS zips — in both variants)
+it runs `publish_cdn.py` to upload them to Cloudflare R2 under `libs/` — the
+URLs Agent DVR's FindFFmpeg requests. Uploads are verified via ranged GET
+through the edge cache after a purge. Requires secrets `R2_SERVICE_URL`,
 `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`; skipped if absent.
 Optionally add `CF_ZONE_ID` (ispyconnect.com zone) and `CF_API_TOKEN`
 (scoped to Zone → Cache Purge only) to purge the replaced URLs from the
@@ -124,6 +140,9 @@ publish an existing release.
 # Build all four at once
 .\build.ps1 -Arch all
 
+# LGPL variant (default is gpl)
+.\build.ps1 -Arch x64 -Variant lgpl
+
 # Override FFmpeg version or output directory
 .\build.ps1 -Arch x64 -FfmpegVer 9.0.1 -OutDir .\dist
 
@@ -142,6 +161,9 @@ Run natively on the target architecture. The script installs any missing build t
 # x86_64 (run on Intel Mac)
 ./build_macos.sh
 
+# LGPL variant (default is gpl)
+VARIANT=lgpl ./build_macos.sh
+
 # Override FFmpeg version or parallelism
 FFMPEG_VER=9.0.1 ./build_macos.sh
 FFMPEG_VER=9.0.1 JOBS=8 ./build_macos.sh
@@ -153,12 +175,13 @@ FFMPEG_VER=9.0.1 JOBS=8 ./build_macos.sh
 
 ```
 out/
-  ffmpeg9.0.1-linux-armhf.tar.xz
-  ffmpeg9.0.1-linux-arm64.tar.xz
+  ffmpeg9.0.1-linux-armhf.tar.xz          (gpl)
+  ffmpeg9.0.1-lgpl-linux-armhf.tar.xz     (lgpl)
+  ffmpeg9.0.1-linux-arm64.tar.xz          ...
   ffmpeg9.0.1-linux-x86_64.tar.xz
 ```
 
-The archive contains `/bin/ffmpeg` and `/lib/libav*.so.*`, `/lib/libsw*.so.*`. Extract with:
+The archive contains `/bin/ffmpeg`, `/lib/libav*.so.*`, `/lib/libsw*.so.*` and `/licenses` (COPYING texts plus a variant-aware LICENSE.txt with the corresponding-source offer). Extract with:
 
 ```bash
 sudo tar -xJf ffmpeg9.0.1-linux-arm64.tar.xz -C /usr/local && sudo ldconfig
@@ -170,30 +193,26 @@ The arm64 tarball also includes `librockchip_mpp.so` under `lib/`.
 
 ```
 out/
-  ffmpeg9.0.1-windows-x64.7z
+  ffmpeg9.0.1-windows-x64.zip        (gpl)
+  ffmpeg9.0.1-lgpl-windows-x64.zip   (lgpl)
 ```
 
-The archive contains only the 7 DLLs and `ffmpeg.exe` at the root. Drop them into your application directory alongside your `.exe` (or anywhere on `PATH`):
-
-```
-avcodec-63.dll  avdevice-63.dll  avfilter-12.dll  avformat-63.dll
-avutil-61.dll   swresample-7.dll  swscale-10.dll   ffmpeg.exe
-```
-
-FFmpeg.AutoGen discovers them automatically via `PATH` or the application directory.
+The zip is flat: the 7 `av*`/`sw*` DLLs, `ffmpeg.exe`, the support DLLs (`libwinpthread-1.dll`, `libvpl.dll`), and the licence texts. Drop everything into one directory. Note the MinGW-built DLLs import the `lib*` support DLLs — if that directory is not on the loader search path, preload the `lib*.dll` files by absolute path before loading `avutil` (AgentDVR does this in `Windows.PreloadSupportLibraries`).
 
 ### macOS (`macos-arm64`, `macos-x86_64`)
 
 ```
 out/
-  ffmpeg9.0.1-macos-arm64.tar.xz
-  ffmpeg9.0.1-macos-x86_64.tar.xz
+  ffmpeg9.0.1-macos-arm64.zip         (gpl; -notarized.zip after signing)
+  ffmpeg9.0.1-lgpl-macos-arm64.zip    (lgpl)
+  ffmpeg9.0.1-macos-x86_64.zip
+  ffmpeg9.0.1-lgpl-macos-x86_64.zip
 ```
 
-The archive contains `/bin/ffmpeg` and `/lib/libav*.dylib`, `/lib/libsw*.dylib`. All dylib install names use `@rpath` so they can be loaded from any directory. Extract with:
+The archive contains `/bin/ffmpeg`, `/lib/libav*.dylib`, `/lib/libsw*.dylib` and `/licenses`. All dylib install names use `@rpath` so they can be loaded from any directory. Extract with:
 
 ```bash
-sudo tar -xJf ffmpeg9.0.1-macos-arm64.tar.xz -C /usr/local
+sudo unzip ffmpeg9.0.1-macos-arm64.zip -d /usr/local
 ```
 
 ## Build options
@@ -203,6 +222,7 @@ sudo tar -xJf ffmpeg9.0.1-macos-arm64.tar.xz -C /usr/local
 | Parameter    | Default  | Description                                            |
 |--------------|----------|--------------------------------------------------------|
 | `-Arch`      | *(required)* | `armhf` / `arm64` / `x64` / `win64` / `both` / `all` |
+| `-Variant`   | `gpl`    | `gpl` (libx264/libx265) or `lgpl` (no GPL components, LGPL v3 output) |
 | `-FfmpegVer` | `9.0.1`    | FFmpeg release tag                                     |
 | `-OutDir`    | `.\out`  | Output directory                                       |
 | `-NoCache`   | off      | Force full rebuild (no Docker layer cache)             |
@@ -214,13 +234,19 @@ All dependency version pins are at the top of `Dockerfile` — bump them there t
 | Variable     | Default  | Description                                            |
 |--------------|----------|--------------------------------------------------------|
 | `FFMPEG_VER` | `9.0.1`    | FFmpeg release tag                                     |
+| `VARIANT`    | `gpl`    | `gpl` (libx264) or `lgpl` (no GPL components)          |
 | `JOBS`       | CPU count | Parallel make jobs                                    |
 
 All version pins are at the top of `build_macos.sh`.
 
 ## Licence note
 
-`--enable-gpl` is required for libx264. The resulting binaries are **GPL 2+**. Do not distribute them in a closed-source product without complying with the GPL (source offer etc.).
+Two variants, two licences:
+
+- **lgpl** — no GPL components (`--enable-version3`, no `--enable-gpl`). The binaries are **LGPL v3** and may be used by and distributed alongside closed-source applications, subject to the LGPL's conditions: keep the libraries as separate, replaceable shared libraries (dynamic loading satisfies this), ship the licence texts, and don't contractually restrict users from modifying the LGPL libraries. This is AgentDVR's default download and is safe to bake into installers or container images.
+- **gpl** — adds libx264/libx265 via `--enable-gpl`; the binaries are **GPL v3**. Distributing them standalone is fine with GPL compliance (licence texts + corresponding source — both handled below). Do **not** ship them combined with a closed-source product in a single artifact; AgentDVR only ever fetches this variant on explicit user opt-in.
+
+Every archive includes a `licenses/` folder with the FFmpeg COPYING texts and a variant-aware `LICENSE.txt` carrying the corresponding-source offer (this repository + the upstream FFmpeg tarball). Keep that folder in the archives — it is the GPL §6(d)/LGPL compliance anchor for the binaries.
 
 ## File map
 
@@ -229,26 +255,28 @@ All version pins are at the top of `build_macos.sh`.
 | `Dockerfile`                      | Single multi-target Dockerfile. `ARG TARGET` selects the target. |
 | `build.ps1`                       | PowerShell orchestrator for Linux/Windows — builds image and extracts archive. |
 | `build_macos.sh`                  | Bash script for macOS — builds all deps and FFmpeg from source natively. |
-| `.github/workflows/build.yml`     | GitHub Actions workflow — parallel matrix of all 6 targets, triggered by version tags. |
+| `.github/workflows/build-*.yml`   | GitHub Actions workflows — arch × variant matrix (12 jobs), triggered by version tags. |
+| `.github/workflows/publish-cdn.yml` | Publishes all 12 release archives to Cloudflare R2 once complete. |
+| `publish_cdn.py`                  | The R2 upload + edge purge + verification script used by publish-cdn.  |
 | `out/`                            | Created at build time. Holds output archives. Gitignored.         |
 
 ## Wiring into AgentDVR
 
-AgentDVR's `Dependencies.cs` downloader expects archives at:
+AgentDVR's `FindFFmpegBase` downloader (SharedLogic/FFmpeg/) requests flat archives from the CDN, falling back to this repo's GitHub Release assets as a mirror (asset filenames must match the CDN exactly):
 
 ```
-https://files.ispyconnect.com/libs/ffmpeg/<version>/linux-<target>.tar.xz
-https://files.ispyconnect.com/libs/ffmpeg/<version>/windows-x64.7z
-https://files.ispyconnect.com/libs/ffmpeg/<version>/macos-arm64.tar.xz
-https://files.ispyconnect.com/libs/ffmpeg/<version>/macos-x86_64.tar.xz
+https://files.ispyconnect.com/libs/ffmpeg<ver>[-lgpl]-linux-<arch>.tar.xz
+https://files.ispyconnect.com/libs/ffmpeg<ver>[-lgpl]-windows-x64.zip
+https://files.ispyconnect.com/libs/ffmpeg<ver>[-lgpl]-macos-<arch>-notarized.zip
 ```
+
+The variant is selected by the `FFmpegGPL` server setting (default false = lgpl; pre-split installs are grandfathered to gpl).
 
 To roll a new version:
 
-1. Push a version tag (e.g. `git tag v9.0.1 && git push origin v9.0.1`).
-2. Wait for all six CI jobs to complete and attach their archives to the GitHub Release.
-3. Upload archives to the CDN under `libs/ffmpeg/<new-version>/`.
-4. Bump the version constant in `Dependencies.cs`.
+1. Push a version tag (`git tag v<ver> && git push origin v<ver>`) — or force-move an existing tag to republish.
+2. All twelve CI jobs attach their archives to the GitHub Release; publish-cdn uploads to R2 and verifies once complete.
+3. Bump `FFMpegVersion` in AgentDVR's `FindFFmpegBase.cs` (and the FFmpeg.AutoGen package if the ABI changed).
 
 ## Troubleshooting
 
