@@ -38,24 +38,26 @@
 # ============================================================================
 ARG FFMPEG_VER=9.0.1
 ARG NASM_VER=2.16.03
-ARG ZLIB_VER=1.3.1
+ARG ZLIB_VER=1.3.2
 ARG BZIP2_VER=1.0.8
-ARG XZ_VER=5.6.2
-ARG OPENSSL_VER=3.4.1
-ARG OGG_VER=1.3.5
+ARG XZ_VER=5.8.3
+ARG OPENSSL_VER=3.5.7
+ARG OGG_VER=1.3.6
 ARG VORBIS_VER=1.3.7
-ARG OPUS_VER=1.5.2
+ARG OPUS_VER=1.6.1
 ARG LAME_VER=3.100
-ARG VPX_VER=1.14.1
-ARG DAV1D_VER=1.4.1
+ARG VPX_VER=1.16.0
+ARG DAV1D_VER=1.5.4
 ARG X264_VER=stable
+# ffnvcodec n13+ raises the minimum NVIDIA driver to ~570; n12.2 keeps NVENC/NVDEC
+# working for users on 550-series drivers (Jetson, frozen driver branches) — hold here.
 ARG FFNVCODEC_VER=n12.2.72.0
-ARG VULKAN_VER=1.3.296
+ARG VULKAN_VER=1.4.360
 ARG AMF_VER=1.5.2
-ARG LIBDRM_VER=2.4.120
-ARG LIBVA_VER=2.23.0
-ARG X265_VER=3.6
-ARG VPL_VER=2.15.0
+ARG LIBDRM_VER=2.4.134
+ARG LIBVA_VER=2.24.1
+ARG X265_VER=4.3
+ARG VPL_VER=2.17.0
 # MPP is cloned from nyanmisaka/rk-mirrors (jellyfin-mpp-next branch) — no tarball version
 
 # ── Target: armhf | arm64 | x86_64
@@ -390,7 +392,9 @@ RUN . /env.sh && set -eux \
 # OpenSSL 3  (https / rtmps)
 # ---------------------------------------------------------------------------
 RUN . /env.sh && set -eux \
- && wget -q "https://www.openssl.org/source/openssl-${OPENSSL_VER}.tar.gz" \
+ # openssl.org/source now redirects to openssl-library.org; GitHub is the
+ # canonical distribution point for current releases.
+ && wget -q "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VER}/openssl-${OPENSSL_VER}.tar.gz" \
  && tar xf openssl-${OPENSSL_VER}.tar.gz && cd openssl-${OPENSSL_VER} \
  && OPENSSL_CROSS="" \
  && if [ "$BUILD_TARGET" = "win64" ]; then \
