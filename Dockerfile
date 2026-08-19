@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 #
 # FFmpeg cross-build  ·  armhf / arm64 / x86_64 / rockchip  ·  glibc ≥ 2.28
-# Variant : GPL  ·  shared libraries (.so)
+# Variants: gpl (libx264/libx265 software encoders, GPL output) ·
+#           lgpl (no GPL components, LGPL v3 output — safe to bundle with the app)
+# Shared libraries (.so / .dll)
 #
 # ── Targets ──────────────────────────────────────────────────────────────────
 #   armhf   Raspberry Pi 2/3/4/Zero2  (ARMv7-A + NEON, hard-float ABI)
@@ -22,9 +24,12 @@
 #   win64   D3D11VA  ·  DXVA2  ·  QSV (Intel, libvpl)  ·  NVENC/NVDEC (NVIDIA)  ·  AMF (AMD)
 #
 # ── Licence note ─────────────────────────────────────────────────────────────
-#   --enable-gpl  → GPL 2+ build (required for libx264).
+#   gpl variant:  --enable-gpl → GPL 2+ build (required for libx264/libx265).
+#   lgpl variant: no GPL components; output is LGPL v3 (--enable-version3,
+#                 needed for Apache-2.0 OpenSSL 3 compatibility).
 #   Included third-party libs and their licences:
-#     libx264     GPL 2+
+#     libx264     GPL 2+   (gpl variant only)
+#     libx265     GPL 2+   (gpl variant only, x86_64)
 #     libopus     BSD / RFC-6716
 #     libvorbis   BSD
 #     libmp3lame  LGPL 2
@@ -65,6 +70,12 @@ ARG VPL_VER=2.17.0
 # ── Target: armhf | arm64 | x86_64
 ARG TARGET=armhf
 
+# ── Variant: gpl | lgpl
+#    gpl  — includes libx264/libx265 software encoders; output is GPL-licensed.
+#    lgpl — no GPL components; output is LGPL v3, safe to bundle with the app.
+#           Hardware encoders and all decoders are unaffected.
+ARG VARIANT=gpl
+
 # ============================================================================
 # Builder
 # ============================================================================
@@ -73,7 +84,7 @@ FROM debian:buster AS builder
 ARG FFMPEG_VER NASM_VER ZLIB_VER BZIP2_VER XZ_VER OPENSSL_VER
 ARG OGG_VER VORBIS_VER OPUS_VER LAME_VER VPX_VER DAV1D_VER X264_VER
 ARG FFNVCODEC_VER VULKAN_VER AMF_VER LIBDRM_VER LIBVA_VER X265_VER VPL_VER
-ARG TARGET
+ARG TARGET VARIANT
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV SYSROOT=/opt/x-sysroot
@@ -246,6 +257,23 @@ case "$TARGET" in
     ;;
 esac
 
+# Licence variant. GPL adds the software encoders (libx264 all targets, libx265
+# x86_64); LGPL strips them so the output libraries are LGPL v3 and safe to
+# bundle directly with the proprietary app. Decoders and hw encoders unaffected.
+case "$VARIANT" in
+  gpl)
+    FF_LICENSE_FLAGS="--enable-gpl --enable-version3 --enable-libx264"
+    ;;
+  lgpl)
+    FF_LICENSE_FLAGS="--enable-version3"
+    FF_HW=$(printf '%s' "$FF_HW" | sed 's/--enable-libx265//')
+    ;;
+  *)
+    echo "ERROR: Unknown VARIANT='$VARIANT'. Valid: gpl, lgpl" >&2
+    exit 1
+    ;;
+esac
+
 if [ "$IS_CROSS" = "1" ]; then
   CC_VAL="${TRIPLE}-gcc"   ; CXX_VAL="${TRIPLE}-g++"
   AR_VAL="${TRIPLE}-ar"    ; AS_VAL="${TRIPLE}-as"
@@ -309,6 +337,8 @@ export VPX_TARGET="${VPX_TARGET}"
 export FF_ARCH_FLAGS="${FF_ARCH}"
 export FF_EXTRA_FLAGS="${FF_EXTRA}"
 export FF_HW_FLAGS="${FF_HW}"
+export FF_VARIANT="${VARIANT}"
+export FF_LICENSE_FLAGS="${FF_LICENSE_FLAGS}"
 export FF_OS="${FF_OS}"
 export FF_WIN_FLAGS="${FF_WIN_FLAGS}"
 export FF_EXTRA_LDFLAGS="${FF_EXTRA_LDFLAGS}"
@@ -505,28 +535,30 @@ RUN . /env.sh && set -eux \
  && cd /build && rm -rf dav1d-*
 
 # ---------------------------------------------------------------------------
-# libx264  (GPL 2+)
+# libx264  (GPL 2+ — gpl variant only)
 # ---------------------------------------------------------------------------
 RUN . /env.sh && set -eux \
- && wget -q \
-      "https://code.videolan.org/videolan/x264/-/archive/${X264_VER}/x264-${X264_VER}.tar.gz" \
- && tar xf x264-${X264_VER}.tar.gz && cd x264-${X264_VER} \
- && X264_CROSS="" \
- && if [ "$IS_CROSS" = "1" ]; then X264_CROSS="--cross-prefix=${TARGET_TRIPLE}-"; fi \
- && if [ "$BUILD_TARGET" = "x86_64" ] || [ "$BUILD_TARGET" = "win64" ]; then \
-        export AS=nasm; \
-    elif [ "$IS_CROSS" = "1" ]; then \
-        # ARM .S files need cpp preprocessing — use cross-gcc, not bare cross-as
-        export AS="${CC}"; \
-    fi \
- && ./configure \
-      ${HOST_FLAG} \
-      ${X264_CROSS} \
-      --prefix=${SYSROOT} \
-      --enable-static --disable-cli --disable-opencl \
-      --enable-pic \
- && make -j$(nproc) && make install \
- && cd /build && rm -rf x264-*
+ && if [ "$FF_VARIANT" = "gpl" ]; then \
+      wget -q \
+        "https://code.videolan.org/videolan/x264/-/archive/${X264_VER}/x264-${X264_VER}.tar.gz" \
+      && tar xf x264-${X264_VER}.tar.gz && cd x264-${X264_VER} \
+      && X264_CROSS="" \
+      && if [ "$IS_CROSS" = "1" ]; then X264_CROSS="--cross-prefix=${TARGET_TRIPLE}-"; fi \
+      && if [ "$BUILD_TARGET" = "x86_64" ] || [ "$BUILD_TARGET" = "win64" ]; then \
+             export AS=nasm; \
+         elif [ "$IS_CROSS" = "1" ]; then \
+             # ARM .S files need cpp preprocessing — use cross-gcc, not bare cross-as
+             export AS="${CC}"; \
+         fi \
+      && ./configure \
+           ${HOST_FLAG} \
+           ${X264_CROSS} \
+           --prefix=${SYSROOT} \
+           --enable-static --disable-cli --disable-opencl \
+           --enable-pic \
+      && make -j$(nproc) && make install \
+      && cd /build && rm -rf x264-*; \
+    fi
 
 # ---------------------------------------------------------------------------
 # libx265  (GPL — software HEVC encoder; x86_64 only)
@@ -538,7 +570,7 @@ RUN . /env.sh && set -eux \
 # with a cmake cross-toolchain file if that ever becomes a supported target.)
 # ---------------------------------------------------------------------------
 RUN . /env.sh && set -eux \
- && if [ "$BUILD_TARGET" = "x86_64" ]; then \
+ && if [ "$BUILD_TARGET" = "x86_64" ] && [ "$FF_VARIANT" = "gpl" ]; then \
       wget -q \
         "https://bitbucket.org/multicoreware/x265_git/downloads/x265_${X265_VER}.tar.gz" \
       && tar xf x265_${X265_VER}.tar.gz && cd x265_${X265_VER} \
@@ -827,8 +859,7 @@ RUN . /env.sh && set -eux \
       --enable-shared \
       --disable-static \
       \
-      --enable-gpl \
-      --enable-version3 \
+      ${FF_LICENSE_FLAGS} \
       --disable-nonfree \
       \
       --disable-debug \
@@ -843,7 +874,6 @@ RUN . /env.sh && set -eux \
       --enable-lzma \
       --enable-openssl \
       \
-      --enable-libx264 \
       --enable-libopus \
       --enable-libvorbis \
       --enable-libvpx \

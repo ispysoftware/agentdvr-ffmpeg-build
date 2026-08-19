@@ -18,6 +18,8 @@ param(
     [ValidateSet("armhf","arm64","x64","win64","both","all")]
     [string]$Arch        = "",
     [string]$FfmpegVer   = "9.0.1",
+    [ValidateSet("gpl","lgpl")]
+    [string]$Variant     = "gpl",   # lgpl = no libx264/libx265, LGPL v3 output
     [string]$OutDir      = "$PSScriptRoot\out",
     [string]$ImageTag    = "",      # auto-derived from Arch if empty
     [ValidateSet("plain","auto")]
@@ -41,6 +43,7 @@ if ($Arch -eq "") {
     Write-Host ""
     Write-Host "Options:"
     Write-Host "  -FfmpegVer <ver>       FFmpeg version                (default: 9.0.1)"
+    Write-Host "  -Variant   gpl|lgpl    gpl = with libx264/libx265; lgpl = LGPL v3, no GPL parts (default: gpl)"
     Write-Host "  -OutDir    <path>      Output directory              (default: .\out)"
     Write-Host "  -Progress  plain|auto  Docker build output verbosity (default: plain)"
     Write-Host "  -NoCache               Force full rebuild (no Docker layer cache)"
@@ -53,13 +56,16 @@ if ($Arch -eq "") {
     exit 0
 }
 
-# Map Arch param to the Docker TARGET build-arg and output archive name
+# Map Arch param to the Docker TARGET build-arg and output archive name.
+# The gpl variant keeps the historical archive names (deployed app versions
+# fetch them by exact name); lgpl inserts a "-lgpl" marker after the version.
+$variantTag = if ($Variant -eq "lgpl") { "-lgpl" } else { "" }
 function Get-ArchConfig($a) {
     switch ($a) {
-        "x64"   { @{ Target = "x86_64"; Archive = "ffmpeg${FfmpegVer}-linux-x86_64.tar.xz";  OS = "linux"   } }
-        "arm64" { @{ Target = "arm64";  Archive = "ffmpeg${FfmpegVer}-linux-arm64.tar.xz";   OS = "linux"   } }
-        "armhf" { @{ Target = "armhf";  Archive = "ffmpeg${FfmpegVer}-linux-armhf.tar.xz";   OS = "linux"   } }
-        "win64" { @{ Target = "win64";  Archive = "ffmpeg${FfmpegVer}-windows-x64.zip";       OS = "windows" } }
+        "x64"   { @{ Target = "x86_64"; Archive = "ffmpeg${FfmpegVer}${variantTag}-linux-x86_64.tar.xz";  OS = "linux"   } }
+        "arm64" { @{ Target = "arm64";  Archive = "ffmpeg${FfmpegVer}${variantTag}-linux-arm64.tar.xz";   OS = "linux"   } }
+        "armhf" { @{ Target = "armhf";  Archive = "ffmpeg${FfmpegVer}${variantTag}-linux-armhf.tar.xz";   OS = "linux"   } }
+        "win64" { @{ Target = "win64";  Archive = "ffmpeg${FfmpegVer}${variantTag}-windows-x64.zip";       OS = "windows" } }
     }
 }
 
@@ -78,10 +84,10 @@ foreach ($a in $archList) {
     $target      = $cfg.Target
     $archiveName = $cfg.Archive
     $archivePath = Join-Path $OutDir $archiveName
-    $tag         = if ($ImageTag) { $ImageTag } else { "ffmpeg-${target}-build" }
+    $tag         = if ($ImageTag) { $ImageTag } else { "ffmpeg-${target}-${Variant}-build" }
 
     Write-Host ""
-    Write-Host "==> Building $a  (Docker TARGET=$target, image: $tag)" -ForegroundColor Cyan
+    Write-Host "==> Building $a  (Docker TARGET=$target, VARIANT=$Variant, image: $tag)" -ForegroundColor Cyan
 
     $buildArgs = @(
         "build",
@@ -89,6 +95,7 @@ foreach ($a in $archList) {
         "--progress", $Progress,
         "--build-arg", "FFMPEG_VER=$FfmpegVer",
         "--build-arg", "TARGET=$target",
+        "--build-arg", "VARIANT=$Variant",
         "-t", $tag
     )
     if ($NoCache) { $buildArgs += "--no-cache" }
