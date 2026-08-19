@@ -13,13 +13,18 @@ on:
 
 jobs:
   build:
-    name: win64
+    name: win64-${{ matrix.variant }}
     runs-on: ubuntu-latest
 
     permissions:
       contents: write
 
     timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [gpl, lgpl]
 
     steps:
       - name: Checkout
@@ -34,12 +39,13 @@ jobs:
             echo "val=${{ inputs.ffmpeg_ver }}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build (win64)
+      - name: Build (win64-${{ matrix.variant }})
         shell: pwsh
         run: >
           ./build.ps1
           -Arch      win64
           -FfmpegVer "${{ steps.ver.outputs.val }}"
+          -Variant   ${{ matrix.variant }}
 
       - name: Publish to GitHub Release
         if: github.ref_type == 'tag'
@@ -51,6 +57,6 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-win64-${{ steps.ver.outputs.val }}
+          name: ffmpeg-win64-${{ matrix.variant }}-${{ steps.ver.outputs.val }}
           path: out/*
           retention-days: 90

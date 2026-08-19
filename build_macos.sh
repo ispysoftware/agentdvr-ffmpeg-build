@@ -29,17 +29,23 @@ set -euo pipefail
 # Version pins — keep in sync with Dockerfile ARGs
 # ============================================================================
 FFMPEG_VER=${FFMPEG_VER:-9.0.1}
-ZLIB_VER=1.3.1
+ZLIB_VER=1.3.2
 BZIP2_VER=1.0.8
-XZ_VER=5.6.2
-OPENSSL_VER=3.4.1
-OGG_VER=1.3.5
+XZ_VER=5.8.3
+OPENSSL_VER=3.5.7
+OGG_VER=1.3.6
 VORBIS_VER=1.3.7
-OPUS_VER=1.5.2
+OPUS_VER=1.6.1
 LAME_VER=3.100
-VPX_VER=1.14.1
-DAV1D_VER=1.4.1
+VPX_VER=1.16.0
+DAV1D_VER=1.5.4
 X264_VER=stable
+
+# ── Variant: gpl (libx264, GPL output) | lgpl (no GPL components, LGPL v3).
+#    The lgpl variant needs no bundled software H264 encoder on macOS —
+#    VideoToolbox is always present.
+VARIANT=${VARIANT:-gpl}
+case "$VARIANT" in gpl|lgpl) ;; *) echo "ERROR: VARIANT must be gpl or lgpl" >&2; exit 1 ;; esac
 
 # ============================================================================
 # Paths
@@ -48,17 +54,21 @@ ARCH=$(uname -m)                              # native machine arch: arm64 or x8
 TARGET_ARCH=${TARGET_ARCH:-${ARCH}}           # compile target (may differ for cross-builds)
 JOBS=${JOBS:-$(sysctl -n hw.logicalcpu)}
 
-SYSROOT=/tmp/ffmpeg-deps-${TARGET_ARCH}       # static deps install prefix
-FFMPEG_PREFIX=/tmp/ffmpeg-out-${TARGET_ARCH}  # FFmpeg install prefix
-BUILD_DIR=/tmp/ffmpeg-build-${TARGET_ARCH}    # scratch build space
+SYSROOT=/tmp/ffmpeg-deps-${TARGET_ARCH}-${VARIANT:-gpl}       # static deps install prefix
+FFMPEG_PREFIX=/tmp/ffmpeg-out-${TARGET_ARCH}-${VARIANT:-gpl}  # FFmpeg install prefix
+BUILD_DIR=/tmp/ffmpeg-build-${TARGET_ARCH}-${VARIANT:-gpl}    # scratch build space
 SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
 OUT_DIR="${SCRIPT_DIR}/out"
 
+# gpl keeps the historical archive names (deployed app versions fetch them
+# by exact name); lgpl inserts a "-lgpl" marker after the version.
+VTAG=""
+[ "$VARIANT" = "lgpl" ] && VTAG="-lgpl"
 if [ "$TARGET_ARCH" = "arm64" ]; then
-    ARCHIVE="ffmpeg${FFMPEG_VER}-macos-arm64.zip"
+    ARCHIVE="ffmpeg${FFMPEG_VER}${VTAG}-macos-arm64.zip"
     OPENSSL_TARGET=darwin64-arm64-cc
 else
-    ARCHIVE="ffmpeg${FFMPEG_VER}-macos-x86_64.zip"
+    ARCHIVE="ffmpeg${FFMPEG_VER}${VTAG}-macos-x86_64.zip"
     OPENSSL_TARGET=darwin64-x86_64-cc
 fi
 
@@ -164,7 +174,9 @@ cd "${BUILD_DIR}" && rm -rf xz-*
 # OpenSSL 3  (https / rtmps)
 # ---------------------------------------------------------------------------
 echo "==> OpenSSL ${OPENSSL_VER}"
-curl -fsSL --retry 3 --retry-delay 5 "https://www.openssl.org/source/openssl-${OPENSSL_VER}.tar.gz" | tar xz
+# openssl.org/source now redirects to openssl-library.org; GitHub is the
+# canonical distribution point for current releases.
+curl -fsSL --retry 3 --retry-delay 5 "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VER}/openssl-${OPENSSL_VER}.tar.gz" | tar xz
 cd openssl-${OPENSSL_VER}
 ./Configure ${OPENSSL_TARGET} \
     --prefix=${SYSROOT} --openssldir=${SYSROOT}/ssl \
@@ -297,25 +309,27 @@ ninja -C _build -j${JOBS} && ninja -C _build install
 cd "${BUILD_DIR}" && rm -rf dav1d-*
 
 # ---------------------------------------------------------------------------
-# libx264  (GPL 2+)
+# libx264  (GPL 2+ — gpl variant only)
 # ---------------------------------------------------------------------------
-echo "==> libx264 (${X264_VER})"
-curl -fsSL --retry 3 --retry-delay 5 \
-    "https://code.videolan.org/videolan/x264/-/archive/${X264_VER}/x264-${X264_VER}.tar.gz" \
-    | tar xz
-cd x264-*/
-if [ "$TARGET_ARCH" = "x86_64" ]; then
-    ./configure --prefix=${SYSROOT} \
-        --enable-static --disable-cli --disable-opencl --enable-pic \
-        ${HOST_FLAG} \
-        AS=nasm
-else
-    ./configure --prefix=${SYSROOT} \
-        --enable-static --disable-cli --disable-opencl --enable-pic \
-        ${HOST_FLAG}
+if [ "$VARIANT" = "gpl" ]; then
+    echo "==> libx264 (${X264_VER})"
+    curl -fsSL --retry 3 --retry-delay 5 \
+        "https://code.videolan.org/videolan/x264/-/archive/${X264_VER}/x264-${X264_VER}.tar.gz" \
+        | tar xz
+    cd x264-*/
+    if [ "$TARGET_ARCH" = "x86_64" ]; then
+        ./configure --prefix=${SYSROOT} \
+            --enable-static --disable-cli --disable-opencl --enable-pic \
+            ${HOST_FLAG} \
+            AS=nasm
+    else
+        ./configure --prefix=${SYSROOT} \
+            --enable-static --disable-cli --disable-opencl --enable-pic \
+            ${HOST_FLAG}
+    fi
+    make -j${JOBS} && make install
+    cd "${BUILD_DIR}" && rm -rf x264-*
 fi
-make -j${JOBS} && make install
-cd "${BUILD_DIR}" && rm -rf x264-*
 
 # ============================================================================
 # 4. FFmpeg  —  GPL · shared libraries (.dylib)
@@ -328,7 +342,9 @@ echo ""
 echo "==> Verifying dependency pkg-config files..."
 # mp3lame is NOT listed here: lame's autotools doesn't reliably install mp3lame.pc
 # on all platforms, and FFmpeg finds it via direct header/library probe instead.
-for pc in libssl vorbis opus vpx dav1d x264; do
+PC_CHECK="libssl vorbis opus vpx dav1d"
+[ "$VARIANT" = "gpl" ] && PC_CHECK="$PC_CHECK x264"
+for pc in $PC_CHECK; do
     if ! PKG_CONFIG_PATH="${PKG_CONFIG_PATH}" pkg-config --exists "${pc}" 2>/dev/null; then
         echo "ERROR: pkg-config package '${pc}' not found — dep build failed"
         echo "  lib/pkgconfig:"
@@ -386,7 +402,7 @@ done
     --enable-shared \
     --disable-static \
     \
-    --enable-gpl \
+    $([ "$VARIANT" = "gpl" ] && echo "--enable-gpl --enable-libx264") \
     --enable-version3 \
     --disable-nonfree \
     \
@@ -402,7 +418,6 @@ done
     --enable-lzma \
     --enable-openssl \
     \
-    --enable-libx264 \
     --enable-libopus \
     --enable-libvorbis \
     --enable-libvpx \
@@ -431,6 +446,36 @@ make -j${JOBS} && make install
 ${STRIP} "${FFMPEG_PREFIX}/bin/ffmpeg"
 find "${FFMPEG_PREFIX}/lib" -name '*.dylib' -not -type l \
     -exec ${STRIP} -x {} \;
+
+# Bundle licence texts + variant summary (mirrors the Dockerfile)
+mkdir -p "${FFMPEG_PREFIX}/licenses"
+cp COPYING.GPLv2 COPYING.GPLv3 COPYING.LGPLv2.1 COPYING.LGPLv3 LICENSE.md \
+    "${FFMPEG_PREFIX}/licenses/"
+if [ "$VARIANT" = "lgpl" ]; then
+    LIC_NAME="GNU Lesser General Public License v3 (see COPYING.LGPLv3)"
+    ENC_NOTE="Software H264 encoding is not bundled on macOS — VideoToolbox is used.
+No GPL components are included in this build."
+else
+    LIC_NAME="GNU General Public License v3 (see COPYING.GPLv3)"
+    ENC_NOTE="Includes x264 (GPL 2+)."
+fi
+cat > "${FFMPEG_PREFIX}/licenses/LICENSE.txt" <<EOF
+FFmpeg ${FFMPEG_VER} — ${VARIANT} variant — target macos-${TARGET_ARCH}
+Built for Agent DVR by iSpy Connect.
+
+Licence of this binary distribution: ${LIC_NAME}
+${ENC_NOTE}
+
+Corresponding source code and the complete build scripts for these exact
+binaries are available at:
+  https://github.com/ispysoftware/agentdvr-ffmpeg-build
+FFmpeg source: https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER}.tar.xz
+
+Bundled third-party components: zlib, bzip2, xz/liblzma, OpenSSL 3 (Apache 2.0),
+libogg, libvorbis, opus, libmp3lame (LGPL), libvpx (BSD), dav1d (BSD),
+VideoToolbox/AudioToolbox (Apple system frameworks). Full licence texts
+accompany this file.
+EOF
 
 cd "${BUILD_DIR}" && rm -rf ffmpeg-*
 
@@ -505,8 +550,8 @@ done < <(otool -L "${FFBIN}" | awk 'NR>1 {print $1}')
 # ============================================================================
 echo ""
 echo "==> Packaging ${ARCHIVE}..."
-# Only ship bin/ and lib/ — consumers don't need headers or share/
-( cd "${FFMPEG_PREFIX}" && zip -r -y "${OUT_DIR}/${ARCHIVE}" bin lib )
+# Only ship bin/, lib/ and licenses/ — consumers don't need headers or share/
+( cd "${FFMPEG_PREFIX}" && zip -r -y "${OUT_DIR}/${ARCHIVE}" bin lib licenses )
 SIZE=$(du -sh "${OUT_DIR}/${ARCHIVE}" | cut -f1)
 echo ""
 echo "==> Done: ${OUT_DIR}/${ARCHIVE}  (${SIZE})"

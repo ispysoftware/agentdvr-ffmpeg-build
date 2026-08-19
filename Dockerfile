@@ -54,6 +54,7 @@ ARG LAME_VER=3.100
 ARG VPX_VER=1.16.0
 ARG DAV1D_VER=1.5.4
 ARG X264_VER=stable
+ARG OPENH264_VER=2.6.0
 # ffnvcodec n13+ raises the minimum NVIDIA driver to ~570; n12.2 keeps NVENC/NVDEC
 # working for users on 550-series drivers (Jetson, frozen driver branches) — hold here.
 ARG FFNVCODEC_VER=n12.2.72.0
@@ -82,7 +83,7 @@ ARG VARIANT=gpl
 FROM debian:buster AS builder
 
 ARG FFMPEG_VER NASM_VER ZLIB_VER BZIP2_VER XZ_VER OPENSSL_VER
-ARG OGG_VER VORBIS_VER OPUS_VER LAME_VER VPX_VER DAV1D_VER X264_VER
+ARG OGG_VER VORBIS_VER OPUS_VER LAME_VER VPX_VER DAV1D_VER X264_VER OPENH264_VER
 ARG FFNVCODEC_VER VULKAN_VER AMF_VER LIBDRM_VER LIBVA_VER X265_VER VPL_VER
 ARG TARGET VARIANT
 
@@ -267,6 +268,13 @@ case "$VARIANT" in
   lgpl)
     FF_LICENSE_FLAGS="--enable-version3"
     FF_HW=$(printf '%s' "$FF_HW" | sed 's/--enable-libx265//')
+    # OpenH264 (BSD) replaces libx264 as the software H264 fallback on Linux.
+    # Windows falls back to h264_mf (MediaFoundation) and macOS to VideoToolbox,
+    # both OS-provided, so only Linux targets bundle a software encoder.
+    if [ "$FF_OS" = "linux" ]; then
+      FF_LICENSE_FLAGS="$FF_LICENSE_FLAGS --enable-libopenh264"
+      EXTRA_LIBS="$EXTRA_LIBS -lstdc++"   # openh264 is C++
+    fi
     ;;
   *)
     echo "ERROR: Unknown VARIANT='$VARIANT'. Valid: gpl, lgpl" >&2
@@ -561,7 +569,30 @@ RUN . /env.sh && set -eux \
     fi
 
 # ---------------------------------------------------------------------------
-# libx265  (GPL — software HEVC encoder; x86_64 only)
+# OpenH264  (BSD-2 — lgpl variant, Linux targets only)
+# Software H264 encode fallback in the LGPL build, replacing libx264.
+# NOTE: Cisco's patent-royalty covenant covers only Cisco's own prebuilt
+# binaries; this self-built copy is BSD on the copyright side with the patent
+# position unchanged — same as it always was for x264.
+# ---------------------------------------------------------------------------
+RUN . /env.sh && set -eux \
+ && if [ "$FF_VARIANT" = "lgpl" ] && [ "$FF_OS" = "linux" ]; then \
+      wget -q "https://github.com/cisco/openh264/archive/refs/tags/v${OPENH264_VER}.tar.gz" \
+        -O openh264-${OPENH264_VER}.tar.gz \
+      && tar xf openh264-${OPENH264_VER}.tar.gz && cd openh264-${OPENH264_VER} \
+      && case "$BUILD_TARGET" in \
+           x86_64) OH_ARCH=x86_64 ;; \
+           arm64)  OH_ARCH=arm64 ;; \
+           armhf)  OH_ARCH=arm ;; \
+         esac \
+      && make -j$(nproc) OS=linux ARCH=${OH_ARCH} \
+           CC="${CC}" CXX="${CXX}" AR="${AR}" \
+           PREFIX=${SYSROOT} install-static \
+      && cd /build && rm -rf openh264-*; \
+    fi
+
+# ---------------------------------------------------------------------------
+# libx265  (GPL — software HEVC encoder; x86_64 only, gpl variant only)
 # x86_64 Linux is the ONLY target without a HEVC-encode fallback: Windows has
 # hevc_mf, macOS has hevc_videotoolbox, arm has rkmpp/v4l2m2m/nvenc. Without
 # this, HEVC encode on a GPU-less (or HW-HEVC-incapable) Linux host has no path
@@ -957,7 +988,45 @@ RUN . /env.sh && set -eux \
       done; \
     fi \
  \
+ # Bundle the FFmpeg licence texts so every shipped archive is self-describing
+ && mkdir -p ${FFMPEG_PREFIX}/licenses \
+ && cp COPYING.GPLv2 COPYING.GPLv3 COPYING.LGPLv2.1 COPYING.LGPLv3 LICENSE.md \
+      ${FFMPEG_PREFIX}/licenses/ \
+ \
  && cd /build && rm -rf ffmpeg-*
+
+# ---------------------------------------------------------------------------
+# LICENSE.txt — variant summary + GPL §3 corresponding-source offer
+# ---------------------------------------------------------------------------
+RUN <<'LICTXT'
+set -eu
+. /env.sh
+if [ "$FF_VARIANT" = "lgpl" ]; then
+  LIC_NAME="GNU Lesser General Public License v3 (see COPYING.LGPLv3)"
+  ENC_NOTE="Software H264 encoding: OpenH264 (BSD-2-Clause, Cisco) on Linux targets.
+No GPL components are included in this build."
+else
+  LIC_NAME="GNU General Public License v3 (see COPYING.GPLv3)"
+  ENC_NOTE="Includes x264 (GPL 2+) and, on linux-x86_64, x265 (GPL 2+)."
+fi
+cat > ${FFMPEG_PREFIX}/licenses/LICENSE.txt <<EOF
+FFmpeg ${FFMPEG_VER} — ${FF_VARIANT} variant — target ${BUILD_TARGET}
+Built for Agent DVR by iSpy Connect.
+
+Licence of this binary distribution: ${LIC_NAME}
+${ENC_NOTE}
+
+Corresponding source code and the complete build scripts for these exact
+binaries are available at:
+  https://github.com/ispysoftware/agentdvr-ffmpeg-build
+FFmpeg source: https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER}.tar.xz
+
+Bundled third-party components: zlib, bzip2, xz/liblzma, OpenSSL 3 (Apache 2.0),
+libogg, libvorbis, opus, libmp3lame (LGPL), libvpx (BSD), dav1d (BSD),
+plus per-target hardware-acceleration support layers (libva, libvpl, libdrm,
+Rockchip MPP as applicable). Full licence texts accompany this file.
+EOF
+LICTXT
 
 # ---------------------------------------------------------------------------
 # libasound stub  (Linux targets only)

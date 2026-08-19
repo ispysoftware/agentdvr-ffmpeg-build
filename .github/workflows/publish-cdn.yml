@@ -54,13 +54,21 @@ jobs:
           VER="${TAG#v}"
           NAMES=$(gh release view "$TAG" --json assets -q '.assets[].name' || true)
           MISSING=0
+          # Both variants per platform: "" = gpl (historical names), "-lgpl".
+          # Keep in sync with publish_cdn.py assets().
           for f in \
             "ffmpeg${VER}-linux-armhf.tar.xz" \
             "ffmpeg${VER}-linux-arm64.tar.xz" \
             "ffmpeg${VER}-linux-x86_64.tar.xz" \
             "ffmpeg${VER}-windows-x64.zip" \
             "ffmpeg${VER}-macos-arm64-notarized.zip" \
-            "ffmpeg${VER}-macos-x86_64-notarized.zip"; do
+            "ffmpeg${VER}-macos-x86_64-notarized.zip" \
+            "ffmpeg${VER}-lgpl-linux-armhf.tar.xz" \
+            "ffmpeg${VER}-lgpl-linux-arm64.tar.xz" \
+            "ffmpeg${VER}-lgpl-linux-x86_64.tar.xz" \
+            "ffmpeg${VER}-lgpl-windows-x64.zip" \
+            "ffmpeg${VER}-lgpl-macos-arm64-notarized.zip" \
+            "ffmpeg${VER}-lgpl-macos-x86_64-notarized.zip"; do
             if ! grep -qxF "$f" <<< "$NAMES"; then
               echo "still missing: $f"
               MISSING=1

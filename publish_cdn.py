@@ -36,15 +36,22 @@ PUBLIC_URL = "https://files.ispyconnect.com/libs"
 
 
 def assets(ver):
-    """The archive names FindFFmpeg requests (flat under libs/), with content types."""
-    return [
-        (f"ffmpeg{ver}-linux-armhf.tar.xz", "application/x-xz"),
-        (f"ffmpeg{ver}-linux-arm64.tar.xz", "application/x-xz"),
-        (f"ffmpeg{ver}-linux-x86_64.tar.xz", "application/x-xz"),
-        (f"ffmpeg{ver}-windows-x64.zip", "application/zip"),
-        (f"ffmpeg{ver}-macos-arm64-notarized.zip", "application/zip"),
-        (f"ffmpeg{ver}-macos-x86_64-notarized.zip", "application/zip"),
-    ]
+    """The archive names FindFFmpeg requests (flat under libs/), with content types.
+
+    Two variants per platform: "" = gpl (historical names, with libx264/libx265)
+    and "-lgpl" (no GPL components; the app's default from the LGPL split on).
+    """
+    out = []
+    for vtag in ("", "-lgpl"):
+        out += [
+            (f"ffmpeg{ver}{vtag}-linux-armhf.tar.xz", "application/x-xz"),
+            (f"ffmpeg{ver}{vtag}-linux-arm64.tar.xz", "application/x-xz"),
+            (f"ffmpeg{ver}{vtag}-linux-x86_64.tar.xz", "application/x-xz"),
+            (f"ffmpeg{ver}{vtag}-windows-x64.zip", "application/zip"),
+            (f"ffmpeg{ver}{vtag}-macos-arm64-notarized.zip", "application/zip"),
+            (f"ffmpeg{ver}{vtag}-macos-x86_64-notarized.zip", "application/zip"),
+        ]
+    return out
 
 
 def _sign(k, m): return hmac.new(k, m.encode(), hashlib.sha256).digest()

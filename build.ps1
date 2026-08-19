@@ -112,7 +112,7 @@ foreach ($a in $archList) {
     Write-Host "==> Creating archive: $archivePath" -ForegroundColor Cyan
 
     # Determine which directories to extract from the container
-    $dockerDirs = if ($cfg.OS -eq "windows") { "bin" } else { "bin lib" }
+    $dockerDirs = if ($cfg.OS -eq "windows") { "bin licenses" } else { "bin lib licenses" }
 
     # Pipe tar stream from container directly — same approach for all platforms.
     # For Windows we then repack as zip; for Linux we keep the tar.xz as-is.

@@ -87,22 +87,27 @@ fi
 if [[ ! "${FETCH}" =~ ^[Nn]$ ]]; then
     for arch in arm64 x86_64; do
         [ -n "${ARCH_FILTER}" ] && [ "${arch}" != "${ARCH_FILTER}" ] && continue
-        NAME="ffmpeg${VERSION}-macos-${arch}.zip"
-        echo "⬇️  ${NAME}"
-        curl -fL --retry 3 --retry-delay 5 -o "${OUT_DIR}/${NAME}" "${RELEASE_URL}/${NAME}"
+        # "" = gpl (historical name), "-lgpl" = LGPL variant (may not exist
+        # for versions released before the variant split — skip quietly).
+        for vtag in "" "-lgpl"; do
+            NAME="ffmpeg${VERSION}${vtag}-macos-${arch}.zip"
+            echo "⬇️  ${NAME}"
+            curl -fL --retry 3 --retry-delay 5 -o "${OUT_DIR}/${NAME}" "${RELEASE_URL}/${NAME}" \
+                || { rm -f "${OUT_DIR}/${NAME}"; echo "⚠️  Not on release, skipping: ${NAME}"; }
+        done
     done
 fi
 
-# Build list of zips to process
+# Build list of zips to process — glob catches both variants and skips
+# already-notarized output from previous runs.
 ZIPS=()
 for arch in arm64 x86_64; do
     [ -n "${ARCH_FILTER}" ] && [ "${arch}" != "${ARCH_FILTER}" ] && continue
-    ZIP="${OUT_DIR}/ffmpeg${VERSION}-macos-${arch}.zip"
-    if [ -f "${ZIP}" ]; then
+    for ZIP in "${OUT_DIR}"/ffmpeg${VERSION}*-macos-${arch}.zip; do
+        [ -f "${ZIP}" ] || continue
+        case "${ZIP}" in *-notarized.zip) continue ;; esac
         ZIPS+=("${ZIP}")
-    else
-        echo "⚠️  Not found, skipping: ${ZIP}"
-    fi
+    done
 done
 
 if [ ${#ZIPS[@]} -eq 0 ]; then
