@@ -56,7 +56,9 @@ ARG VULKAN_VER=1.4.360
 ARG AMF_VER=1.5.2
 ARG LIBDRM_VER=2.4.134
 ARG LIBVA_VER=2.24.1
-ARG X265_VER=4.3
+# 4.3 exists only as a git tag — multicoreware publishes no 4.3 tarball on the
+# Bitbucket downloads page; 4.2 is the newest packaged release there.
+ARG X265_VER=4.2
 ARG VPL_VER=2.17.0
 # MPP is cloned from nyanmisaka/rk-mirrors (jellyfin-mpp-next branch) — no tarball version
 
