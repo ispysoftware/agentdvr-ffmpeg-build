@@ -313,8 +313,13 @@ cd "${BUILD_DIR}" && rm -rf dav1d-*
 # ---------------------------------------------------------------------------
 if [ "$VARIANT" = "gpl" ]; then
     echo "==> libx264 (${X264_VER})"
+    # code.videolan.org throttles parallel CI downloads — fall back to the
+    # GitHub mirror (branch-name URL: X264_VER must be a branch, e.g. stable).
     curl -fsSL --retry 3 --retry-delay 5 \
         "https://code.videolan.org/videolan/x264/-/archive/${X264_VER}/x264-${X264_VER}.tar.gz" \
+        | tar xz \
+    || curl -fsSL --retry 3 --retry-delay 5 \
+        "https://github.com/mirror/x264/archive/refs/heads/${X264_VER}.tar.gz" \
         | tar xz
     cd x264-*/
     if [ "$TARGET_ARCH" = "x86_64" ]; then

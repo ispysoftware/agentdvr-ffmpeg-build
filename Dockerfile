@@ -547,8 +547,13 @@ RUN . /env.sh && set -eux \
 # ---------------------------------------------------------------------------
 RUN . /env.sh && set -eux \
  && if [ "$FF_VARIANT" = "gpl" ]; then \
-      wget -q \
-        "https://code.videolan.org/videolan/x264/-/archive/${X264_VER}/x264-${X264_VER}.tar.gz" \
+      # code.videolan.org throttles parallel CI downloads — fall back to the
+      # GitHub mirror (branch-name URL: X264_VER must be a branch, e.g. stable).
+      { wget -q --tries=3 --waitretry=5 \
+          "https://code.videolan.org/videolan/x264/-/archive/${X264_VER}/x264-${X264_VER}.tar.gz" \
+        || wget -q \
+          "https://github.com/mirror/x264/archive/refs/heads/${X264_VER}.tar.gz" \
+          -O x264-${X264_VER}.tar.gz; } \
       && tar xf x264-${X264_VER}.tar.gz && cd x264-${X264_VER} \
       && X264_CROSS="" \
       && if [ "$IS_CROSS" = "1" ]; then X264_CROSS="--cross-prefix=${TARGET_TRIPLE}-"; fi \
