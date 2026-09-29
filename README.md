@@ -57,10 +57,10 @@ Version pins live at the top of the `Dockerfile` (ARGs) and must be kept in sync
 
 | Library       | Licence     | Purpose                                            |
 |---------------|-------------|----------------------------------------------------|
-| Rockchip MPP  | Apache 2.0  | Rockchip VPU H.264/H.265 hardware codec. Deployed as `librockchip_mpp.so` alongside the FFmpeg libs. The driver (`rkvdec` / `mpp_service`) must be present in the target kernel — on non-Rockchip boards FFmpeg simply won't find it at runtime and falls back to software. |
+| Rockchip MPP  | Apache 2.0 + LGPL 2.1+ | Rockchip VPU H.264/H.265 hardware codec. Deployed as `librockchip_mpp.so` alongside the FFmpeg libs. The driver (`rkvdec` / `mpp_service`) must be present in the target kernel — on non-Rockchip boards FFmpeg simply won't find it at runtime and falls back to software. |
 | libdrm        | MIT         | DRM Prime buffer sharing (required by rkmpp)       |
 
-> **Note on Rockchip MPP source.** The canonical `rockchip-linux/mpp` repo was DMCA-taken-down in December 2025. This build clones `nyanmisaka/rk-mirrors` (branch `jellyfin-mpp-next`) — the same fork Jellyfin uses in production.
+> **Note on Rockchip MPP source.** The canonical `rockchip-linux/mpp` repo was DMCA-taken-down in December 2025: FFmpeg developers showed that twelve of its AV1/H.265/VP9 decoder parser files are derived from libavcodec (LGPL 2.1+) with the FFmpeg notices removed. This build uses `nyanmisaka/rk-mirrors` (branch `jellyfin-mpp-next`, the fork Jellyfin uses in production) at the commit pinned by `MPP_COMMIT` in the Dockerfile, downloaded from this repo's `source-rockchip-mpp-<commit>` release - a copy of that commit's source kept here as the LGPL source offer, since the mirror could go the same way. The library as a whole is treated as LGPL 3.0 or later.
 
 ## Bundled shared libraries (Linux)
 

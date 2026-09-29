@@ -36,7 +36,7 @@
 #     libvpx      BSD   (VP8/VP9 encoder/decoder)
 #     dav1d       BSD   (AV1 decoder)
 #     OpenSSL 3   Apache 2.0  (https / rtmps)
-#     rockchip_mpp  Apache 2.0  (rockchip target only)
+#     rockchip_mpp  Apache 2.0 + LGPL 2.1+  (arm64 only; decoder parsers derived from FFmpeg)
 
 # ============================================================================
 # Version pins – bump here only
@@ -66,7 +66,13 @@ ARG LIBVA_VER=2.24.1
 # Bitbucket downloads page; 4.2 is the newest packaged release there.
 ARG X265_VER=4.2
 ARG VPL_VER=2.17.0
-# MPP is cloned from nyanmisaka/rk-mirrors (jellyfin-mpp-next branch) — no tarball version
+# Rockchip MPP: nyanmisaka/rk-mirrors (jellyfin-mpp-next) has no releases and upstream
+# rockchip-linux/mpp was DMCA'd, so the exact commit is pinned and built from a copy of its
+# source published as this repo's source-rockchip-mpp-<commit> release - also the LGPL source
+# offer for the FFmpeg-derived decoder parsers in it. To move to another commit: publish that
+# commit's GitHub archive the same way, then update both values.
+ARG MPP_COMMIT=a9380ef333102ac318628f83b5f7a460d377749e
+ARG MPP_SHA256=68da788139ea4187c249001fa523a98d567e2caa6cfcdd3a5171e0c998c8202b
 
 # ── Target: armhf | arm64 | x86_64
 ARG TARGET=armhf
@@ -85,6 +91,7 @@ FROM debian:buster AS builder
 ARG FFMPEG_VER NASM_VER ZLIB_VER BZIP2_VER XZ_VER OPENSSL_VER
 ARG OGG_VER VORBIS_VER OPUS_VER LAME_VER VPX_VER DAV1D_VER X264_VER OPENH264_VER
 ARG FFNVCODEC_VER VULKAN_VER AMF_VER LIBDRM_VER LIBVA_VER X265_VER VPL_VER
+ARG MPP_COMMIT MPP_SHA256
 ARG TARGET VARIANT
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -790,7 +797,8 @@ RUN . /env.sh && set -eux \
 # Built as shared library; shipped in the output tarball alongside FFmpeg.
 # Target device needs the rkvdec / mpp_service kernel driver.
 #
-# Source: nyanmisaka/rk-mirrors (jellyfin-mpp-next branch)
+# Source: nyanmisaka/rk-mirrors (jellyfin-mpp-next branch) at MPP_COMMIT, from this repo's
+# source-rockchip-mpp-<commit> release (see the pins at the top)
 #   - rockchip-linux/mpp was DMCA taken down December 2025
 #   - HermanChen/mpp cmake install doesn't put headers in include/rockchip/
 #   - nyanmisaka/rk-mirrors is maintained by Jellyfin and has correct cmake
@@ -798,8 +806,11 @@ RUN . /env.sh && set -eux \
 # ---------------------------------------------------------------------------
 RUN . /env.sh && set -eux \
  && if [ "$BUILD_TARGET" = "arm64" ]; then \
-      git clone -b jellyfin-mpp-next --depth=1 \
-        https://github.com/nyanmisaka/rk-mirrors.git rkmpp \
+      wget -q \
+        "https://github.com/ispysoftware/agentdvr-ffmpeg-build/releases/download/source-rockchip-mpp-${MPP_COMMIT}/rockchip-mpp-${MPP_COMMIT}.tar.gz" \
+        -O rkmpp.tar.gz \
+      && echo "${MPP_SHA256}  rkmpp.tar.gz" | sha256sum -c - \
+      && mkdir rkmpp && tar xf rkmpp.tar.gz -C rkmpp --strip-components=1 \
       && cd rkmpp \
       && cmake -B _build \
            -DCMAKE_BUILD_TYPE=Release \
@@ -836,7 +847,7 @@ RUN . /env.sh && set -eux \
       && printf 'prefix=%s\nlibdir=${prefix}/lib\nincludedir=${prefix}/include\n\nName: rockchip_mpp\nDescription: Rockchip Media Process Platform\nVersion: 1.3.8\nLibs: -L${libdir} -lrockchip_mpp\nCflags: -I${includedir}\n' \
            "${SYSROOT}" > ${SYSROOT}/lib/pkgconfig/rockchip_mpp.pc \
       \
-      && cd /build && rm -rf rkmpp; \
+      && cd /build && rm -rf rkmpp rkmpp.tar.gz; \
     fi
 
 # ============================================================================
@@ -1029,7 +1040,9 @@ FFmpeg source: https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER}.tar.xz
 Bundled third-party components: zlib, bzip2, xz/liblzma, OpenSSL 3 (Apache 2.0),
 libogg, libvorbis, opus, libmp3lame (LGPL), libvpx (BSD), dav1d (BSD),
 plus per-target hardware-acceleration support layers (libva, libvpl, libdrm,
-Rockchip MPP as applicable). Full licence texts accompany this file.
+Rockchip MPP as applicable). Agent DVR lists them with their licence texts in its
+Licenses folder. Rockchip MPP (arm64) includes decoder code derived from FFmpeg
+(LGPL 2.1+); its source is the source-rockchip-mpp-* release of the repository above.
 EOF
 LICTXT
 
