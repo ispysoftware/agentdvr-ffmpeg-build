@@ -3,7 +3,8 @@
 # notarize_macos.sh — Sign and notarize pre-built FFmpeg macOS zips
 #
 # Works with output from build_macos.sh (zips already contain bin/ and lib/
-# with correct rpath install names).  This script adds the @loader_path rpath
+# with correct rpath install names, plus licenses/, which is carried over
+# unchanged).  This script adds the @loader_path rpath
 # needed for .NET / FFmpeg.AutoGen, signs everything, and submits to Apple.
 #
 # Prerequisites:
@@ -159,7 +160,11 @@ for INPUT_ZIP in "${ZIPS[@]}"; do
     # --- Repack ---
     SIGNED_ZIP="${OUT_DIR}/${BASENAME}-notarized.zip"
     echo "📦 Repacking → $(basename "${SIGNED_ZIP}")..."
-    (cd "${WORK_DIR}" && zip -r -y -q -X "${SIGNED_ZIP}" bin lib -x "*.DS_Store")
+    # licenses/ (COPYING.*, LICENSE.md, LICENSE.txt) must survive the repack: an
+    # LGPL/GPL binary has to ship with its licence text and source offer.
+    PARTS=(bin lib)
+    [ -d "${WORK_DIR}/licenses" ] && PARTS+=(licenses)
+    (cd "${WORK_DIR}" && zip -r -y -q -X "${SIGNED_ZIP}" "${PARTS[@]}" -x "*.DS_Store")
 
     rm -rf "${WORK_DIR}"
     trap - EXIT
