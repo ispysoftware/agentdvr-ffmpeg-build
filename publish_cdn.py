@@ -19,7 +19,7 @@ has the same shape.
 
 Usage:
   python publish_cdn.py                 # version from ffmpeg_version.txt, prompts before upload
-  python publish_cdn.py --version 9.0.1
+  python publish_cdn.py --version 9.0.2
   python publish_cdn.py --yes           # no prompt (scripted use)
   python publish_cdn.py --config path\to\config.json
 

@@ -6,7 +6,7 @@
 #         .\build.ps1 -Arch win64
 #         .\build.ps1 -Arch both            # x64 + arm64
 #         .\build.ps1 -Arch all             # x64 + arm64 + armhf + win64
-#         .\build.ps1 -Arch x64 -FfmpegVer 9.0.1 -OutDir .\out
+#         .\build.ps1 -Arch x64 -FfmpegVer 9.0.2 -OutDir .\out
 #         .\build.ps1 -Arch arm64 -NoCache
 #
 # NOTE: --progress=plain is built in; do not pass it on the command line.
@@ -17,7 +17,7 @@
 param(
     [ValidateSet("armhf","arm64","x64","win64","both","all")]
     [string]$Arch        = "",
-    [string]$FfmpegVer   = "9.0.1",
+    [string]$FfmpegVer   = "9.0.2",
     [ValidateSet("gpl","lgpl")]
     [string]$Variant     = "gpl",   # lgpl = no libx264/libx265, LGPL v3 output
     [string]$OutDir      = "$PSScriptRoot\out",
@@ -42,7 +42,7 @@ if ($Arch -eq "") {
     Write-Host "  all     x64 + arm64 + armhf + win64"
     Write-Host ""
     Write-Host "Options:"
-    Write-Host "  -FfmpegVer <ver>       FFmpeg version                (default: 9.0.1)"
+    Write-Host "  -FfmpegVer <ver>       FFmpeg version                (default: 9.0.2)"
     Write-Host "  -Variant   gpl|lgpl    gpl = with libx264/libx265; lgpl = LGPL v3, no GPL parts (default: gpl)"
     Write-Host "  -OutDir    <path>      Output directory              (default: .\out)"
     Write-Host "  -Progress  plain|auto  Docker build output verbosity (default: plain)"
@@ -51,7 +51,7 @@ if ($Arch -eq "") {
     Write-Host "Examples:"
     Write-Host "  .\build.ps1 -Arch x64"
     Write-Host "  .\build.ps1 -Arch win64"
-    Write-Host "  .\build.ps1 -Arch all -FfmpegVer 9.0.1"
+    Write-Host "  .\build.ps1 -Arch all -FfmpegVer 9.0.2"
     Write-Host ""
     exit 0
 }

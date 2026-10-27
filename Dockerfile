@@ -41,17 +41,17 @@
 # ============================================================================
 # Version pins – bump here only
 # ============================================================================
-ARG FFMPEG_VER=9.0.1
+ARG FFMPEG_VER=9.0.2
 ARG NASM_VER=2.16.03
 ARG ZLIB_VER=1.3.2
 ARG BZIP2_VER=1.0.8
-ARG XZ_VER=5.8.3
-ARG OPENSSL_VER=3.5.7
+ARG XZ_VER=5.8.4
+ARG OPENSSL_VER=3.5.9
 ARG OGG_VER=1.3.6
 ARG VORBIS_VER=1.3.7
 ARG OPUS_VER=1.6.1
 ARG LAME_VER=3.100
-ARG VPX_VER=1.16.0
+ARG VPX_VER=1.17.0
 ARG DAV1D_VER=1.5.4
 ARG X264_VER=stable
 ARG OPENH264_VER=2.6.0
@@ -59,7 +59,7 @@ ARG OPENH264_VER=2.6.0
 # working for users on 550-series drivers (Jetson, frozen driver branches) — hold here.
 ARG FFNVCODEC_VER=n12.2.72.0
 ARG VULKAN_VER=1.4.360
-ARG AMF_VER=1.5.2
+ARG AMF_VER=1.5.3
 ARG LIBDRM_VER=2.4.134
 ARG LIBVA_VER=2.24.1
 # 4.3 exists only as a git tag — multicoreware publishes no 4.3 tarball on the
@@ -857,6 +857,8 @@ RUN . /env.sh && set -eux \
 # 0001: accept TCP-interleaved SETUP replies whose Transport header omits the
 #       explicit /TCP token (cheap OEM firmwares) — otherwise ffmpeg fails
 #       with "Nonmatching transport in server reply".
+# 0002: cap RTSP redirects at 8 (backport from master) — a rogue camera
+#       answering every request with a 3xx otherwise hangs the source forever.
 COPY patches/ /patches/
 
 RUN . /env.sh && set -eux \

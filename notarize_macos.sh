@@ -63,9 +63,9 @@ ARCH_FILTER="${2:-}"  # optional: arm64 or x86_64
 
 INPUT_VER=""
 if [ -z "${NONINTERACTIVE:-}" ]; then
-    read -p "Please enter the FFmpeg version to notarize [default: 9.0.1]: " INPUT_VER
+    read -p "Please enter the FFmpeg version to notarize [default: 9.0.2]: " INPUT_VER
 fi
-VERSION="${INPUT_VER:-${VERSION:-${FFMPEG_VER:-9.0.1}}}"
+VERSION="${INPUT_VER:-${VERSION:-${FFMPEG_VER:-9.0.2}}}"
 if [[ ! "$VERSION" =~ ^[0-9]+([.][0-9]+){0,2}$ ]]; then
     echo "Invalid FFmpeg version."
     exit 1

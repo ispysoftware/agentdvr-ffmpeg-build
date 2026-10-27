@@ -1,6 +1,6 @@
 # AgentDVR — FFmpeg cross-build
 
-Builds **FFmpeg 9.0.1 shared libraries** from source for all platforms AgentDVR ships, targeting [FFmpeg.AutoGen 9.0.1](https://github.com/Ruslan-B/FFmpeg.AutoGen). Linux and Windows builds run inside Docker on any x86_64 machine; macOS builds run natively on the target architecture.
+Builds **FFmpeg 9.0.2 shared libraries** from source for all platforms AgentDVR ships, targeting [FFmpeg.AutoGen 9.0.1](https://github.com/Ruslan-B/FFmpeg.AutoGen). Linux and Windows builds run inside Docker on any x86_64 machine; macOS builds run natively on the target architecture.
 
 Every platform is built in **two variants**:
 
@@ -41,15 +41,15 @@ All dependencies are compiled statically into the FFmpeg `.so` / `.dylib` / `.dl
 | libx264     | stable  | GPL 2+      | gpl only | H.264 encoder                   |
 | libx265     | 4.2     | GPL 2+      | gpl only, linux-x86_64 | H.265 encoder     |
 | OpenH264    | 2.6.0   | BSD-2       | lgpl only, Linux targets | H.264 encoder (software fallback) |
-| libvpx      | 1.16.0  | BSD         | both    | VP8 / VP9 encoder + decoder      |
+| libvpx      | 1.17.0  | BSD         | both    | VP8 / VP9 encoder + decoder      |
 | dav1d       | 1.5.4   | BSD         | both    | AV1 decoder                      |
 | libopus     | 1.6.1   | BSD         | both    | Opus audio codec                 |
 | libvorbis   | 1.3.7   | BSD         | both    | Vorbis audio codec               |
 | libmp3lame  | 3.100   | LGPL 2      | both    | MP3 encoder                      |
-| OpenSSL     | 3.5.7   | Apache 2.0  | both    | HTTPS / RTMPS transport          |
+| OpenSSL     | 3.5.9   | Apache 2.0  | both    | HTTPS / RTMPS transport          |
 | zlib        | 1.3.2   | zlib        | both    | Deflate (MKV/MP4 metadata)       |
 | bzip2       | 1.0.8   | BSD-like    | both    | bzip2 demux                      |
-| liblzma/xz  | 5.8.3   | Public Domain | both  | xz/lzma demux                    |
+| liblzma/xz  | 5.8.4   | Public Domain | both  | xz/lzma demux                    |
 
 Version pins live at the top of the `Dockerfile` (ARGs) and must be kept in sync manually with the pin block at the top of `build_macos.sh`.
 
@@ -68,7 +68,7 @@ A few libraries can't be statically linked because they are runtime loaders that
 
 | Library    | Targets        | Why it's shipped, not static                                  |
 |------------|----------------|---------------------------------------------------------------|
-| libva (`libva.so.2`, `libva-drm.so.2`) | x86_64 | VA-API loader. **Built from source (2.23.0)**, not taken from the Buster base image. Buster's libva 2.4 (2019) only probes driver entry points up to `__vaDriverInit_1_4`; any current Mesa `radeonsi` / Intel `iHD` driver exports a higher VA-API minor and fails `vaInitialize()` with `EIO` (FFmpeg reports `ret=-5`) even when the driver is correctly installed. Bundling a current libva lets the tarball load whatever driver the host provides. |
+| libva (`libva.so.2`, `libva-drm.so.2`) | x86_64 | VA-API loader. **Built from source (2.24.1)**, not taken from the Buster base image. Buster's libva 2.4 (2019) only probes driver entry points up to `__vaDriverInit_1_4`; any current Mesa `radeonsi` / Intel `iHD` driver exports a higher VA-API minor and fails `vaInitialize()` with `EIO` (FFmpeg reports `ret=-5`) even when the driver is correctly installed. Bundling a current libva lets the tarball load whatever driver the host provides. |
 | librockchip_mpp | arm64     | Rockchip VPU codec (see [arm64 only](#arm64-only) above).      |
 
 > **libvulkan is deliberately not bundled.** FFmpeg dlopens `libvulkan.so.1` at runtime (it is not a `NEEDED` dependency), so its absence cannot break library loading — Vulkan acceleration simply probes unavailable. A bundled copy would shadow the host's modern loader via `RUNPATH=$ORIGIN` (the libva bug all over again), and the loader is useless without GPU ICDs, which always install a current loader as a package dependency.
@@ -80,11 +80,11 @@ A few libraries can't be statically linked because they are runtime loaders that
 Pushing a version tag builds all six targets **in both variants** (twelve jobs) in parallel and attaches the archives to a GitHub Release automatically:
 
 ```powershell
-git tag v9.0.1
-git push origin v9.0.1
+git tag v9.0.2
+git push origin v9.0.2
 ```
 
-The tag name must be exactly `v<ffmpeg version>` — the workflows derive `FFMPEG_VER` from it. To republish an existing version (rebuilt binaries, new library pins), force-move the tag: `git tag -f v9.0.1 && git push origin v9.0.1 --force`.
+The tag name must be exactly `v<ffmpeg version>` — the workflows derive `FFMPEG_VER` from it. To republish an existing version (rebuilt binaries, new library pins), force-move the tag: `git tag -f v9.0.2 && git push origin v9.0.2 --force`.
 
 You can also trigger targets manually from **Actions → Run workflow** in the GitHub UI — dispatch runs upload workflow artifacts only (no release, no CDN), useful for testing.
 
@@ -144,7 +144,7 @@ publish an existing release.
 .\build.ps1 -Arch x64 -Variant lgpl
 
 # Override FFmpeg version or output directory
-.\build.ps1 -Arch x64 -FfmpegVer 9.0.1 -OutDir .\dist
+.\build.ps1 -Arch x64 -FfmpegVer 9.0.2 -OutDir .\dist
 
 # Force a full rebuild (no Docker layer cache)
 .\build.ps1 -Arch x64 -NoCache
@@ -165,8 +165,8 @@ Run natively on the target architecture. The script installs any missing build t
 VARIANT=lgpl ./build_macos.sh
 
 # Override FFmpeg version or parallelism
-FFMPEG_VER=9.0.1 ./build_macos.sh
-FFMPEG_VER=9.0.1 JOBS=8 ./build_macos.sh
+FFMPEG_VER=9.0.2 ./build_macos.sh
+FFMPEG_VER=9.0.2 JOBS=8 ./build_macos.sh
 ```
 
 ## Outputs
@@ -175,16 +175,16 @@ FFMPEG_VER=9.0.1 JOBS=8 ./build_macos.sh
 
 ```
 out/
-  ffmpeg9.0.1-linux-armhf.tar.xz          (gpl)
-  ffmpeg9.0.1-lgpl-linux-armhf.tar.xz     (lgpl)
-  ffmpeg9.0.1-linux-arm64.tar.xz          ...
-  ffmpeg9.0.1-linux-x86_64.tar.xz
+  ffmpeg9.0.2-linux-armhf.tar.xz          (gpl)
+  ffmpeg9.0.2-lgpl-linux-armhf.tar.xz     (lgpl)
+  ffmpeg9.0.2-linux-arm64.tar.xz          ...
+  ffmpeg9.0.2-linux-x86_64.tar.xz
 ```
 
 The archive contains `/bin/ffmpeg`, `/lib/libav*.so.*`, `/lib/libsw*.so.*` and `/licenses` (COPYING texts plus a variant-aware LICENSE.txt with the corresponding-source offer). Extract with:
 
 ```bash
-sudo tar -xJf ffmpeg9.0.1-linux-arm64.tar.xz -C /usr/local && sudo ldconfig
+sudo tar -xJf ffmpeg9.0.2-linux-arm64.tar.xz -C /usr/local && sudo ldconfig
 ```
 
 The arm64 tarball also includes `librockchip_mpp.so` under `lib/`.
@@ -193,8 +193,8 @@ The arm64 tarball also includes `librockchip_mpp.so` under `lib/`.
 
 ```
 out/
-  ffmpeg9.0.1-windows-x64.zip        (gpl)
-  ffmpeg9.0.1-lgpl-windows-x64.zip   (lgpl)
+  ffmpeg9.0.2-windows-x64.zip        (gpl)
+  ffmpeg9.0.2-lgpl-windows-x64.zip   (lgpl)
 ```
 
 The zip is flat: the 7 `av*`/`sw*` DLLs, `ffmpeg.exe`, the support DLLs (`libwinpthread-1.dll`, `libvpl.dll`), and the licence texts. Drop everything into one directory. Note the MinGW-built DLLs import the `lib*` support DLLs — if that directory is not on the loader search path, preload the `lib*.dll` files by absolute path before loading `avutil` (AgentDVR does this in `Windows.PreloadSupportLibraries`).
@@ -203,16 +203,16 @@ The zip is flat: the 7 `av*`/`sw*` DLLs, `ffmpeg.exe`, the support DLLs (`libwin
 
 ```
 out/
-  ffmpeg9.0.1-macos-arm64.zip         (gpl; -notarized.zip after signing)
-  ffmpeg9.0.1-lgpl-macos-arm64.zip    (lgpl)
-  ffmpeg9.0.1-macos-x86_64.zip
-  ffmpeg9.0.1-lgpl-macos-x86_64.zip
+  ffmpeg9.0.2-macos-arm64.zip         (gpl; -notarized.zip after signing)
+  ffmpeg9.0.2-lgpl-macos-arm64.zip    (lgpl)
+  ffmpeg9.0.2-macos-x86_64.zip
+  ffmpeg9.0.2-lgpl-macos-x86_64.zip
 ```
 
 The archive contains `/bin/ffmpeg`, `/lib/libav*.dylib`, `/lib/libsw*.dylib` and `/licenses`. All dylib install names use `@rpath` so they can be loaded from any directory. Extract with:
 
 ```bash
-sudo unzip ffmpeg9.0.1-macos-arm64.zip -d /usr/local
+sudo unzip ffmpeg9.0.2-macos-arm64.zip -d /usr/local
 ```
 
 ## Build options
@@ -223,7 +223,7 @@ sudo unzip ffmpeg9.0.1-macos-arm64.zip -d /usr/local
 |--------------|----------|--------------------------------------------------------|
 | `-Arch`      | *(required)* | `armhf` / `arm64` / `x64` / `win64` / `both` / `all` |
 | `-Variant`   | `gpl`    | `gpl` (libx264/libx265) or `lgpl` (no GPL components, LGPL v3 output) |
-| `-FfmpegVer` | `9.0.1`    | FFmpeg release tag                                     |
+| `-FfmpegVer` | `9.0.2`    | FFmpeg release tag                                     |
 | `-OutDir`    | `.\out`  | Output directory                                       |
 | `-NoCache`   | off      | Force full rebuild (no Docker layer cache)             |
 
@@ -233,7 +233,7 @@ All dependency version pins are at the top of `Dockerfile` — bump them there t
 
 | Variable     | Default  | Description                                            |
 |--------------|----------|--------------------------------------------------------|
-| `FFMPEG_VER` | `9.0.1`    | FFmpeg release tag                                     |
+| `FFMPEG_VER` | `9.0.2`    | FFmpeg release tag                                     |
 | `VARIANT`    | `gpl`    | `gpl` (libx264) or `lgpl` (no GPL components)          |
 | `JOBS`       | CPU count | Parallel make jobs                                    |
 

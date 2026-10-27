@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       ffmpeg_ver:
-        description: 'FFmpeg version (e.g. 9.0.1)'
+        description: 'FFmpeg version (e.g. 9.0.2)'
         required: false
-        default: '9.0.1'
+        default: '9.0.2'
       arch:
         description: 'Target architecture'
         required: true

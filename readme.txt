@@ -1,7 +1,7 @@
 FFmpeg ARM/x86 Cross-Build
 ==========================
 
-Builds FFmpeg 9.0.1 as shared libraries (.so) for three target platforms,
+Builds FFmpeg 9.0.2 as shared libraries (.so) for three target platforms,
 cross-compiled from Windows using Docker. Output is a self-contained .tar.xz
 that can be unpacked directly onto the target device.
 
@@ -36,31 +36,31 @@ Open PowerShell in this folder and run:
 
 Output lands in the out\ folder:
 
-  out\ffmpeg9.0.1-linux-x86_64.tar.xz
-  out\ffmpeg9.0.1-linux-arm64.tar.xz
-  out\ffmpeg9.0.1-linux-armhf.tar.xz
-  out\ffmpeg9.0.1-windows-x64.7z
+  out\ffmpeg9.0.2-linux-x86_64.tar.xz
+  out\ffmpeg9.0.2-linux-arm64.tar.xz
+  out\ffmpeg9.0.2-linux-armhf.tar.xz
+  out\ffmpeg9.0.2-windows-x64.7z
 
 Build options:
 
   -Arch      x64 | arm64 | armhf | win64 | both | all
-  -FfmpegVer 9.0.1                          (default: 9.0.1)
+  -FfmpegVer 9.0.2                          (default: 9.0.2)
   -OutDir    .\out                         (default: .\out)
   -NoCache                                 force a clean rebuild, no Docker cache
 
 Examples:
 
   .\build.ps1 -Target arm64 -NoCache
-  .\build.ps1 -Target x86_64 -FfmpegVer 9.0.1 -OutDir C:\output
+  .\build.ps1 -Target x86_64 -FfmpegVer 9.0.2 -OutDir C:\output
 
 
 DEPLOYING
 ---------
 Copy the tarball to the target device and unpack into /usr/local:
 
-  scp dist\ffmpeg9.0.1-linux-arm64.tar.xz user@<device>:~/
+  scp dist\ffmpeg9.0.2-linux-arm64.tar.xz user@<device>:~/
   ssh user@<device>
-  sudo tar -xJf ffmpeg9.0.1-linux-arm64.tar.xz -C /usr/local
+  sudo tar -xJf ffmpeg9.0.2-linux-arm64.tar.xz -C /usr/local
   sudo ldconfig
 
 FFmpeg will then be available at /usr/local/bin/ffmpeg.
