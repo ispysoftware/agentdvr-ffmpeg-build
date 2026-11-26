@@ -1,0 +1,222 @@
+diff --git a/libavcodec/d3d12va_decode.c b/libavcodec/d3d12va_decode.c
+index 39feb3a..8636aed 100644
+--- a/libavcodec/d3d12va_decode.c
++++ b/libavcodec/d3d12va_decode.c
+@@ -477,8 +477,8 @@ av_cold int ff_d3d12va_decode_init(AVCodecContext *avctx)
+     if (ret < 0)
+         goto fail;
+ 
+-    DX_CHECK(ID3D12Device_CreateCommandQueue(ctx->device_ctx->device, &queue_desc,
+-             &IID_ID3D12CommandQueue, (void **)&ctx->command_queue));
++    if (avpriv_d3d12va_get_command_queue(frames_ctx->device_ctx, queue_desc.Type, &ctx->command_queue) < 0)
++        goto fail;
+ 
+     DX_CHECK(ID3D12Device_CreateCommandList(ctx->device_ctx->device, 0, queue_desc.Type,
+              command_allocator, NULL, &IID_ID3D12CommandList, (void **)&ctx->command_list));
+diff --git a/libavfilter/vf_scale_d3d12.c b/libavfilter/vf_scale_d3d12.c
+index 7bddda6..8fd0175 100644
+--- a/libavfilter/vf_scale_d3d12.c
++++ b/libavfilter/vf_scale_d3d12.c
+@@ -257,10 +257,10 @@ static int scale_d3d12_configure_processor(ScaleD3D12Context *s, AVFilterContext
+         .NodeMask = 0
+     };
+ 
+-    hr = ID3D12Device_CreateCommandQueue(s->device, &queue_desc, &IID_ID3D12CommandQueue, (void **)&s->command_queue);
+-    if (FAILED(hr)) {
+-        av_log(ctx, AV_LOG_ERROR, "Failed to create command queue: HRESULT 0x%lX\n", hr);
+-        return AVERROR_EXTERNAL;
++    ret = avpriv_d3d12va_get_command_queue(hwctx, queue_desc.Type, &s->command_queue);
++    if (ret < 0) {
++        av_log(ctx, AV_LOG_ERROR, "Failed to get a video process command queue\n");
++        return ret;
+     }
+ 
+     s->process_support.NodeIndex = 0;
+diff --git a/libavutil/hwcontext_d3d12va.c b/libavutil/hwcontext_d3d12va.c
+index f9d1721..ffdf33f 100644
+--- a/libavutil/hwcontext_d3d12va.c
++++ b/libavutil/hwcontext_d3d12va.c
+@@ -52,6 +52,28 @@ typedef struct D3D12VAFramesContext {
+     int                        nb_surfaces_used;
+ } D3D12VAFramesContext;
+ 
++/*
++ * Command queues shared per ID3D12Device (see avpriv_d3d12va_get_command_queue).
++ * D3D12CreateDevice returns the same device for an adapter within a process, so
++ * device contexts created separately (one per decoder is common) still share one
++ * pool. A pool lives while at least one initialised device context uses its device
++ * and is released with the last one, so a removed device isn't kept alive.
++ */
++#define D3D12VA_QUEUE_POOL_SIZE 8
++#define D3D12VA_MAX_QUEUE_POOLS 16
++
++enum { D3D12VA_POOL_DECODE, D3D12VA_POOL_PROCESS, D3D12VA_POOL_COPY, D3D12VA_POOL_TYPES };
++
++typedef struct D3D12VAQueuePool {
++    ID3D12Device       *device;    ///< identity only; a registered device context holds a reference
++    int                 refs;
++    ID3D12CommandQueue *queues[D3D12VA_POOL_TYPES][D3D12VA_QUEUE_POOL_SIZE];
++    unsigned            next[D3D12VA_POOL_TYPES];
++} D3D12VAQueuePool;
++
++static AVMutex          queue_pool_mutex = AV_MUTEX_INITIALIZER;
++static D3D12VAQueuePool queue_pools[D3D12VA_MAX_QUEUE_POOLS];
++
+ typedef struct D3D12VADevicePriv {
+     /**
+      * The public AVD3D12VADeviceContext. See hwcontext_d3d12va.h for it.
+@@ -62,8 +84,96 @@ typedef struct D3D12VADevicePriv {
+     PFN_CREATE_DXGI_FACTORY2      create_dxgi_factory2;
+     PFN_D3D12_CREATE_DEVICE       create_device;
+     PFN_D3D12_GET_DEBUG_INTERFACE get_debug_interface;
++    D3D12VAQueuePool             *queue_pool; ///< NULL when no pool slot was free: queues are created per call
+ } D3D12VADevicePriv;
+ 
++static void d3d12va_queue_pool_register(D3D12VADevicePriv *priv)
++{
++    D3D12VAQueuePool *free_slot = NULL;
++
++    ff_mutex_lock(&queue_pool_mutex);
++    for (int i = 0; i < D3D12VA_MAX_QUEUE_POOLS; i++) {
++        D3D12VAQueuePool *pool = &queue_pools[i];
++        if (pool->refs > 0 && pool->device == priv->p.device) {
++            pool->refs++;
++            priv->queue_pool = pool;
++            ff_mutex_unlock(&queue_pool_mutex);
++            return;
++        }
++        if (!pool->refs && !free_slot)
++            free_slot = pool;
++    }
++    if (free_slot) {
++        memset(free_slot, 0, sizeof(*free_slot));
++        free_slot->device = priv->p.device;
++        free_slot->refs   = 1;
++    }
++    priv->queue_pool = free_slot;
++    ff_mutex_unlock(&queue_pool_mutex);
++}
++
++static void d3d12va_queue_pool_unregister(D3D12VADevicePriv *priv)
++{
++    D3D12VAQueuePool *pool = priv->queue_pool;
++
++    if (!pool)
++        return;
++    priv->queue_pool = NULL;
++
++    ff_mutex_lock(&queue_pool_mutex);
++    if (--pool->refs == 0) {
++        for (int t = 0; t < D3D12VA_POOL_TYPES; t++)
++            for (int i = 0; i < D3D12VA_QUEUE_POOL_SIZE; i++)
++                D3D12_OBJECT_RELEASE(pool->queues[t][i]);
++        pool->device = NULL;
++    }
++    ff_mutex_unlock(&queue_pool_mutex);
++}
++
++int avpriv_d3d12va_get_command_queue(AVHWDeviceContext *dev, D3D12_COMMAND_LIST_TYPE type,
++                                     ID3D12CommandQueue **queue)
++{
++    D3D12VADevicePriv *priv = dev->hwctx;
++    D3D12VAQueuePool  *pool = priv->queue_pool;
++    D3D12_COMMAND_QUEUE_DESC desc = {
++        .Type     = type,
++        .Priority = 0,
++        .Flags    = D3D12_COMMAND_QUEUE_FLAG_NONE,
++        .NodeMask = 0,
++    };
++    ID3D12CommandQueue **slot;
++    int t;
++
++    *queue = NULL;
++    switch (type) {
++    case D3D12_COMMAND_LIST_TYPE_VIDEO_DECODE:  t = D3D12VA_POOL_DECODE;  break;
++    case D3D12_COMMAND_LIST_TYPE_VIDEO_PROCESS: t = D3D12VA_POOL_PROCESS; break;
++    case D3D12_COMMAND_LIST_TYPE_COPY:          t = D3D12VA_POOL_COPY;    break;
++    default:                                    t = -1;                   break;
++    }
++
++    if (!pool || t < 0) {
++        if (FAILED(ID3D12Device_CreateCommandQueue(priv->p.device, &desc, &IID_ID3D12CommandQueue,
++                                                   (void **)queue)))
++            return AVERROR_EXTERNAL;
++        return 0;
++    }
++
++    ff_mutex_lock(&queue_pool_mutex);
++    slot = &pool->queues[t][pool->next[t]++ % D3D12VA_QUEUE_POOL_SIZE];
++    if (!*slot && FAILED(ID3D12Device_CreateCommandQueue(priv->p.device, &desc, &IID_ID3D12CommandQueue,
++                                                         (void **)slot))) {
++        *slot = NULL;
++        ff_mutex_unlock(&queue_pool_mutex);
++        return AVERROR_EXTERNAL;
++    }
++    ID3D12CommandQueue_AddRef(*slot);
++    *queue = *slot;
++    ff_mutex_unlock(&queue_pool_mutex);
++
++    return 0;
++}
++
+ static const struct {
+     DXGI_FORMAT d3d_format;
+     enum AVPixelFormat pix_fmt;
+@@ -155,8 +265,8 @@ static int d3d12va_create_helper_objects(AVHWFramesContext *ctx)
+     if (!s->sync_ctx.event)
+         goto fail;
+ 
+-    DX_CHECK(ID3D12Device_CreateCommandQueue(device_hwctx->device, &queue_desc,
+-             &IID_ID3D12CommandQueue, (void **)&s->command_queue));
++    if (avpriv_d3d12va_get_command_queue(ctx->device_ctx, queue_desc.Type, &s->command_queue) < 0)
++        goto fail;
+ 
+     DX_CHECK(ID3D12Device_CreateCommandAllocator(device_hwctx->device, queue_desc.Type,
+              &IID_ID3D12CommandAllocator, (void **)&s->command_allocator));
+@@ -686,6 +796,8 @@ static int d3d12va_device_init(AVHWDeviceContext *hwdev)
+     if (!ctx->video_device)
+         DX_CHECK(ID3D12Device_QueryInterface(ctx->device, &IID_ID3D12VideoDevice, (void **)&ctx->video_device));
+ 
++    d3d12va_queue_pool_register(hwdev->hwctx);
++
+     return 0;
+ 
+ fail:
+@@ -696,6 +808,8 @@ static void d3d12va_device_uninit(AVHWDeviceContext *hwdev)
+ {
+     AVD3D12VADeviceContext *device_hwctx = hwdev->hwctx;
+ 
++    d3d12va_queue_pool_unregister(hwdev->hwctx);
++
+     D3D12_OBJECT_RELEASE(device_hwctx->video_device);
+ 
+     if (device_hwctx->lock == d3d12va_default_lock) {
+diff --git a/libavutil/hwcontext_d3d12va_internal.h b/libavutil/hwcontext_d3d12va_internal.h
+index f343033..04a81ca 100644
+--- a/libavutil/hwcontext_d3d12va_internal.h
++++ b/libavutil/hwcontext_d3d12va_internal.h
+@@ -56,4 +56,24 @@
+         }                                             \
+     } while (0)
+ 
++#include "hwcontext.h"
++#include "hwcontext_d3d12va.h"
++
++/**
++ * Get a command queue of the given type for work on dev's ID3D12Device.
++ *
++ * Video decode, video process and copy queues come from a small pool shared
++ * by every device context on the same ID3D12Device (one per adapter per
++ * process): some drivers cap the number of video queues a process may create
++ * and remove the device when one more is created (NVIDIA: ~50 decode queues),
++ * which took down every D3D12 user in the process once enough decoders were
++ * open. Queues are free-threaded; callers keep their own command lists,
++ * allocators and fences. Other queue types are created per call.
++ *
++ * @param queue receives a referenced queue; release it with D3D12_OBJECT_RELEASE
++ * @return 0 on success, a negative AVERROR on failure
++ */
++int avpriv_d3d12va_get_command_queue(AVHWDeviceContext *dev, D3D12_COMMAND_LIST_TYPE type,
++                                     ID3D12CommandQueue **queue);
++
+ #endif /* AVUTIL_HWCONTEXT_D3D12VA_INTERNAL_H */

@@ -952,8 +952,9 @@ RUN . /env.sh && set -eux \
 # 0001: accept TCP-interleaved SETUP replies whose Transport header omits the
 #       explicit /TCP token (cheap OEM firmwares) — otherwise ffmpeg fails
 #       with "Nonmatching transport in server reply".
-# 0002: cap RTSP redirects at 8 (backport from master) — a rogue camera
-#       answering every request with a 3xx otherwise hangs the source forever.
+# 0003: D3D12 decoders, frame downloads and scale_d3d12 share a small pool of
+#       command queues per device instead of one each — NVIDIA removes the
+#       device once a process creates ~50 video queues (see patches/README.md).
 COPY patches/ /patches/
 
 RUN . /env.sh && set -eux \
