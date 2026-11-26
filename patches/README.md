@@ -21,8 +21,11 @@ treat an RTP reply with an `interleaved=` parameter and no explicit lower
 transport as TCP — `interleaved` is only meaningful on TCP, so this cannot
 misclassify a genuine UDP reply.
 
-Verify after each FFmpeg version bump that the hunks still apply (the build
-fails loudly if they don't).
+Verify after each FFmpeg version bump that the hunks still apply. Both apply
+steps use `-N` (never reverse-apply a patch that looks already applied - macOS's
+`patch` otherwise answers its own "Assume -R? [y]" prompt and removes the change)
+and fail the build unless the patch applies cleanly and a reverse dry run shows
+it fully in place.
 
 ## Dropped: 0002-rtsp-limit-the-number-of-redirects.patch
 

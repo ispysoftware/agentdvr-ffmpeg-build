@@ -923,11 +923,18 @@ RUN . /env.sh && set -eux \
  \
  && cd ffmpeg-${FFMPEG_VER} \
  \
- # Apply local patches — sed strips CRLF in case a Windows checkout mangled them
+ # Apply local patches — sed strips CRLF in case a Windows checkout mangled them.
+ # -N: never reverse-apply a patch that looks already applied (it would silently REMOVE the
+ # change). Fail unless it applies cleanly, then prove it is fully in place with a reverse
+ # dry run. Same steps as build_macos.sh.
  && for pf in /patches/*.patch; do \
       [ -e "$pf" ] || continue; \
       echo "=== applying $(basename "$pf") ==="; \
-      sed 's/\r$//' "$pf" | patch -p1 --fuzz=0; \
+      sed 's/\r$//' "$pf" > /tmp/local.patch; \
+      patch -p1 -N --fuzz=0 -i /tmp/local.patch \
+        || { echo "ERROR: $(basename "$pf") did not apply cleanly (already in this FFmpeg? drop it)"; exit 1; }; \
+      patch -p1 -R --dry-run --fuzz=0 -i /tmp/local.patch > /dev/null \
+        || { echo "ERROR: $(basename "$pf") is not fully applied"; exit 1; }; \
     done \
  \
  && CROSS_COMPILE_FLAGS="" \

@@ -384,10 +384,21 @@ cd ffmpeg-${FFMPEG_VER}
 
 # Apply local patches (patches/*.patch, -p1, in order — keep in sync with
 # the Dockerfile). sed strips CRLF in case a Windows checkout mangled them.
+# -N matters here: with no terminal, macOS's patch answers its own
+# "Reversed (or previously applied) patch detected! Assume -R? [y]" with yes and
+# REMOVES the change, exiting 0 (the first v9.1 macOS builds stripped the RTSP
+# redirect limit that way). Fail unless the patch applies cleanly, then prove it
+# is fully in place with a reverse dry run.
 for pf in "${SCRIPT_DIR}"/patches/*.patch; do
     [ -e "$pf" ] || continue
     echo "    applying $(basename "$pf")"
-    sed 's/\r$//' "$pf" | patch -p1 --fuzz=0
+    tmp_patch="$(mktemp)"
+    sed 's/\r$//' "$pf" > "$tmp_patch"
+    patch -p1 -N --fuzz=0 -i "$tmp_patch" \
+        || { echo "ERROR: $(basename "$pf") did not apply cleanly (already in this FFmpeg? drop it)"; exit 1; }
+    patch -p1 -R --dry-run --fuzz=0 -i "$tmp_patch" > /dev/null \
+        || { echo "ERROR: $(basename "$pf") is not fully applied"; exit 1; }
+    rm -f "$tmp_patch"
 done
 
 ./configure \
