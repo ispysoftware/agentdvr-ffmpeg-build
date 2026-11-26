@@ -93,6 +93,15 @@ ARG VARIANT=gpl
 ARG BASE_IMAGE=debian:buster
 
 # ============================================================================
+# Current CA bundle (copied into the builder - see step 1b). The debian:trixie image
+# itself has no ca-certificates package, so install it here.
+# ============================================================================
+FROM debian:trixie AS cacerts
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# ============================================================================
 # Builder
 # ============================================================================
 FROM ${BASE_IMAGE} AS builder
@@ -198,9 +207,10 @@ RUN dpkg --add-architecture armhf \
 #     Encrypt's 2026 hierarchy (YR1 -> Root YR); hosts that renewed onto it, starting with
 #     downloads.xiph.org on 2026-11-20, fail wget with exit 5 (certificate verification)
 #     because buster's GnuTLS doesn't fetch missing intermediates. Take the bundle from a
-#     current Debian instead. On the trixie base (win64) this replaces the file with itself.
+#     current Debian (the cacerts stage) instead. On the trixie base (win64) this replaces
+#     the file with an identical one.
 # ---------------------------------------------------------------------------
-COPY --from=debian:trixie /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=cacerts /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # ---------------------------------------------------------------------------
 # 2. Per-target environment
