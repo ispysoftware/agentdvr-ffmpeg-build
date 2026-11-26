@@ -272,7 +272,11 @@ case "$TARGET" in
     # -fstack-protector-strong on MinGW requires libssp for __stack_chk_fail/__stack_chk_guard.
     # Omit it for the win64 cross-build so statically-linked deps (dav1d etc.) don't
     # pull in an SSP runtime dependency that breaks FFmpeg's configure link tests.
-    HARDENING_FLAGS=""
+    # _FORTIFY_SOURCE=0 for the same reason: opus's configure adds -D_FORTIFY_SOURCE=2 unless
+    # it is already defined, and MinGW-w64 8+ implements it with __memcpy_chk/__memset_chk
+    # from libssp - libopus.a then fails FFmpeg's link test ("opus not found"). Buster's
+    # MinGW 6 had no fortify support, so this only bit once win64 moved to bookworm.
+    HARDENING_FLAGS="-D_FORTIFY_SOURCE=0"
     MESON_CPU_FAMILY=x86_64 ; MESON_CPU=x86_64 ; MESON_SYSTEM=windows
     IS_CROSS=1 ; BUILD_TARGET=win64
     ;;
