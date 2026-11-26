@@ -295,7 +295,11 @@ case "$TARGET" in
     FF_EXTRA=""
     FF_HW="--enable-d3d11va --enable-d3d12va --enable-dxva2 --enable-nvenc --enable-nvdec --enable-amf --enable-libvpl"
     FF_OS=mingw32
-    FF_WIN_FLAGS="--enable-w32threads --windres=${TRIPLE}-windres"
+    # --disable-filter=gfxcapture: the Windows Graphics Capture source is C++/WinRT and links
+    # -lstdc++ dynamically, so with MinGW-w64 14 headers (which enable it) avfilter-12.dll
+    # imported libstdc++-6.dll - not shipped, and a stray copy on PATH made ffmpeg.exe fail with
+    # 0xC0000139. Agent has its own desktop capture.
+    FF_WIN_FLAGS="--enable-w32threads --windres=${TRIPLE}-windres --disable-filter=gfxcapture"
     # -static-libgcc: FFmpeg 9's libswscale (fp16/int128 helpers) emits calls
     # into GCC's support runtime; linked shared that makes swscale-10.dll
     # depend on libgcc_s_seh-1.dll, which target machines don't have.
@@ -1066,11 +1070,16 @@ RUN . /env.sh && set -eux \
       [ -n "$VPLDLL" ] || { echo "ERROR: libvpl.dll missing from sysroot after build — QSV would silently fail"; ls -la ${SYSROOT}/bin ${SYSROOT}/lib 2>/dev/null || true; exit 1; }; \
       cp "$VPLDLL" ${FFMPEG_PREFIX}/bin/; \
       ${STRIP} --strip-unneeded "${FFMPEG_PREFIX}/bin/$(basename "$VPLDLL")" || true; \
-      # Guard: no output binary may import GCC's shared runtime — target
-      # machines don't have it. Regresses if -static-libgcc is ever dropped.
+      # Guard: no output binary may import GCC's shared runtimes — target
+      # machines don't have them. Regresses if -static-libgcc is ever dropped,
+      # or a C++ component (e.g. gfxcapture) gets enabled.
       for f in ${FFMPEG_PREFIX}/bin/*.dll ${FFMPEG_PREFIX}/bin/ffmpeg.exe; do \
         if grep -q "libgcc_s_seh" "$f"; then \
           echo "ERROR: $(basename "$f") imports libgcc_s_seh-1.dll — -static-libgcc regressed"; \
+          exit 1; \
+        fi; \
+        if grep -q "libstdc++-6.dll" "$f"; then \
+          echo "ERROR: $(basename "$f") imports libstdc++-6.dll — a C++ component was enabled"; \
           exit 1; \
         fi; \
       done; \
