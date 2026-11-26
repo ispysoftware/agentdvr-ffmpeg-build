@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       ffmpeg_ver:
-        description: 'FFmpeg version (e.g. 9.0.2)'
+        description: 'FFmpeg version (e.g. 9.1)'
         required: false
-        default: '9.0.2'
+        default: '9.1'
 
 jobs:
   build:

@@ -24,14 +24,9 @@ misclassify a genuine UDP reply.
 Verify after each FFmpeg version bump that the hunks still apply (the build
 fails loudly if they don't).
 
-## 0002-rtsp-limit-the-number-of-redirects.patch
+## Dropped: 0002-rtsp-limit-the-number-of-redirects.patch
 
-Backport of FFmpeg master `f5d4fd186c` ("avformat/rtsp: limit the number of
-redirects"). `ff_rtsp_connect` follows every 3xx reply with `goto redirect`
-and no counter, so a rogue or misconfigured RTSP server that keeps
-redirecting (to itself, or between two URLs) holds the connect call in an
-endless loop and the camera source never starts or fails. The patch gives up
-with `AVERROR(EIO)` after 8 redirects. It is not on `release/9.0` as of
-n9.0.2; drop this file once the pinned FFmpeg release contains it.
-
-The hunk offsets assume 0001 has been applied first.
+Was a backport of FFmpeg master `f5d4fd186c` ("avformat/rtsp: limit the number
+of redirects", 8 redirects then `AVERROR(EIO)`) for 9.0.2. FFmpeg 9.1 ships the
+same change, so the file was removed when the build moved to 9.1 (applying it
+again made `patch` ignore both hunks and fail the build).
