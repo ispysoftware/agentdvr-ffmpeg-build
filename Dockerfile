@@ -50,7 +50,9 @@ ARG OPENSSL_VER=3.5.9
 ARG OGG_VER=1.3.6
 ARG VORBIS_VER=1.3.7
 ARG OPUS_VER=1.6.1
-ARG LAME_VER=3.100
+# 4.0 (2026-07-11): encoder buffer overflow and SSE fixes from 3.101, and builds with
+# GCC 14. Built with --disable-decoder, so 3.101+'s optional libmpg123 isn't needed.
+ARG LAME_VER=4.0
 ARG VPX_VER=1.17.0
 ARG DAV1D_VER=1.5.4
 ARG X264_VER=stable
@@ -281,7 +283,7 @@ case "$TARGET" in
     # MinGW 6 had no fortify support, so this only bit once win64 moved to a newer base.
     HARDENING_FLAGS="-D_FORTIFY_SOURCE=0"
     # win64 builds on trixie (GCC 14), which turns several long-standing C warnings into
-    # errors by default. The older C deps (lame 3.100, libvorbis, bzip2...) were written for
+    # errors by default. The older C deps (libvorbis, bzip2...) were written for
     # GCC 8 on buster; keep these as warnings so they build as before. C only - the C++
     # compiler rejects these options, and FFmpeg's configure re-adds
     # -Werror=implicit-function-declaration for FFmpeg's own code.
