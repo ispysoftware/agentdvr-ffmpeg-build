@@ -26,7 +26,7 @@ FFmpeg.AutoGen loads FFmpeg's shared libraries at runtime via P/Invoke. The libr
 | `armhf`      | Docker / Debian Buster  | glibc 2.28    | V4L2 M2M (Pi 2/3/4 H.264 kernel decoder)                    |
 | `arm64`      | Docker / Debian Buster  | glibc 2.28    | V4L2 M2M · Rockchip MPP (RK3566/RK3568/RK3588) · NVENC/NVDEC (Jetson) · Vulkan |
 | `x86_64`     | Docker / Debian Buster  | glibc 2.28    | VA-API (Intel/AMD)¹ · NVENC/NVDEC (NVIDIA) · Vulkan · AMF (AMD) |
-| `win64`      | Docker / Debian Trixie / MinGW-w64 12 | Windows 10+ | D3D11VA · D3D12VA · DXVA2 · NVENC/NVDEC (NVIDIA) · AMF (AMD) |
+| `win64`      | Docker / Debian Trixie / MinGW-w64 14 (built from source) | Windows 10+ | D3D11VA · D3D12VA (+ scale_d3d12) · DXVA2 · NVENC/NVDEC (NVIDIA) · AMF (AMD) |
 | `macos-arm64`| Native / macOS runner   | macOS 12+     | VideoToolbox · AudioToolbox                                  |
 | `macos-x86_64`| Native / macOS runner  | macOS 12+     | VideoToolbox · AudioToolbox                                  |
 

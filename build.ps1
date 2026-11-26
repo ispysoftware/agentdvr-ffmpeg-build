@@ -37,7 +37,7 @@ if ($Arch -eq "") {
     Write-Host "  x64     linux-x86_64 (Debian Buster, glibc 2.28)  VA-API, QSV, NVENC/NVDEC, Vulkan, AMF"
     Write-Host "  arm64   linux-arm64  (Debian Buster, glibc 2.28)  V4L2 M2M, Rockchip MPP, NVENC/NVDEC, Vulkan"
     Write-Host "  armhf   linux-armhf  (Debian Buster, glibc 2.28)  V4L2 M2M"
-    Write-Host "  win64   windows-x64  (Debian Trixie, MinGW-w64 12) D3D11VA, D3D12VA, DXVA2, QSV, NVENC/NVDEC, AMF"
+    Write-Host "  win64   windows-x64  (Debian Trixie, MinGW-w64 14) D3D11VA, D3D12VA, DXVA2, QSV, NVENC/NVDEC, AMF"
     Write-Host "  both    x64 + arm64"
     Write-Host "  all     x64 + arm64 + armhf + win64"
     Write-Host ""

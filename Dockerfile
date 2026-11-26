@@ -75,6 +75,12 @@ ARG VPL_VER=2.17.0
 # commit's GitHub archive the same way, then update both values.
 ARG MPP_COMMIT=a9380ef333102ac318628f83b5f7a460d377749e
 ARG MPP_SHA256=68da788139ea4187c249001fa523a98d567e2caa6cfcdd3a5171e0c998c8202b
+# win64 only: MinGW-w64 headers + CRT built from this release, replacing trixie's 12.0.0.
+# 14.0.0 is the first with ID3D12VideoProcessor (d3d12video.h), which FFmpeg's scale_d3d12
+# filter needs; no stable distro ships it yet (trixie 12, Ubuntu 26.04 13). SourceForge
+# release tarball mingw-w64-v<ver>.tar.bz2.
+ARG MINGW_W64_VER=14.0.0
+ARG MINGW_W64_SHA256=6eaf921d9eb987d3820b364ea9775bc19b965ec81490b6fdd716526c28e1995c
 
 # ── Target: armhf | arm64 | x86_64
 ARG TARGET=armhf
@@ -89,7 +95,8 @@ ARG VARIANT=gpl
 #    Linux targets stay on buster for the glibc 2.28 floor. win64 has no glibc floor and
 #    needs MinGW-w64 12+ for d3d12video.h (ID3D12VideoDecoder), which --enable-d3d12va
 #    requires: buster ships 6.0 and bookworm 10.0, neither has it. build.ps1 passes
-#    debian:trixie (MinGW-w64 12, GCC 14) for win64.
+#    debian:trixie (GCC 14) for win64, and the MinGW-w64 headers/CRT are rebuilt at 14.0.0 on top
+#    (see MINGW_W64_VER) for ID3D12VideoProcessor, which scale_d3d12 needs.
 ARG BASE_IMAGE=debian:buster
 
 # ============================================================================
@@ -110,6 +117,7 @@ ARG FFMPEG_VER NASM_VER ZLIB_VER BZIP2_VER XZ_VER OPENSSL_VER
 ARG OGG_VER VORBIS_VER OPUS_VER LAME_VER VPX_VER DAV1D_VER X264_VER OPENH264_VER
 ARG FFNVCODEC_VER VULKAN_VER AMF_VER LIBDRM_VER LIBVA_VER X265_VER VPL_VER
 ARG MPP_COMMIT MPP_SHA256
+ARG MINGW_W64_VER MINGW_W64_SHA256
 ARG TARGET VARIANT
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -276,7 +284,7 @@ case "$TARGET" in
     # Windows x86-64 via MinGW-w64 cross-compiler.
     # Produces .dll files loadable by FFmpeg.AutoGen on Windows.
     # D3D11VA, D3D12VA and DXVA2 use Windows SDK headers bundled with MinGW-w64.
-    # D3D12VA needs MinGW-w64 12+ (d3d12video.h): build on trixie (build.ps1 does). It's
+    # D3D12VA needs MinGW-w64 12+ (d3d12video.h), scale_d3d12 needs 14+ (built from source on trixie). It's
     # enabled explicitly so configure fails instead of silently dropping it on old headers.
     # NVENC/NVDEC and AMF are header-only; drivers loaded at runtime.
     TRIPLE=x86_64-w64-mingw32
@@ -416,6 +424,35 @@ chmod +x /env.sh
 SETUP
 
 WORKDIR /build
+
+# ---------------------------------------------------------------------------
+# MinGW-w64 headers + CRT  (win64 only) - see MINGW_W64_VER.
+# Installed over trixie's 12.0.0 in /usr/x86_64-w64-mingw32, where its GCC looks; trixie's
+# GCC and winpthreads stay. --with-default-msvcrt=msvcrt keeps Debian's C runtime: the
+# shipped DLLs import msvcrt.dll, and GCC's own support libraries were built against it -
+# a UCRT default would mix two C runtimes in one DLL. Fails if the header still lacks
+# ID3D12VideoProcessor (the reason this exists).
+# ---------------------------------------------------------------------------
+RUN if [ "$TARGET" = "win64" ]; then \
+      set -eux; \
+      wget -q "https://downloads.sourceforge.net/project/mingw-w64/mingw-w64/mingw-w64-release/mingw-w64-v${MINGW_W64_VER}.tar.bz2" -O mingw-w64.tar.bz2; \
+      echo "${MINGW_W64_SHA256}  mingw-w64.tar.bz2" | sha256sum -c -; \
+      tar xf mingw-w64.tar.bz2; \
+      cd mingw-w64-v${MINGW_W64_VER}; \
+      mkdir build-headers && cd build-headers; \
+      ../mingw-w64-headers/configure --host=x86_64-w64-mingw32 --prefix=/usr/x86_64-w64-mingw32 \
+        --with-default-msvcrt=msvcrt; \
+      make install; \
+      cd ..; \
+      grep -q 'typedef struct ID3D12VideoProcessorVtbl' /usr/x86_64-w64-mingw32/include/d3d12video.h \
+        || { echo "ERROR: MinGW-w64 ${MINGW_W64_VER} headers have no ID3D12VideoProcessor"; exit 1; }; \
+      mkdir build-crt && cd build-crt; \
+      ../mingw-w64-crt/configure --host=x86_64-w64-mingw32 --prefix=/usr/x86_64-w64-mingw32 \
+        --with-default-msvcrt=msvcrt --enable-lib64 --disable-lib32; \
+      make -j$(nproc); \
+      make install; \
+      cd /build && rm -rf mingw-w64-v${MINGW_W64_VER} mingw-w64.tar.bz2; \
+    fi
 
 # ---------------------------------------------------------------------------
 # MinGW-w64 shim headers  (win64 only)
@@ -1008,6 +1045,13 @@ RUN . /env.sh && set -eux \
              ls -la; \
            fi; \
            exit 1; } \
+ # win64: scale_d3d12 (GPU resize on D3D12 frames) is autodetected, not requested, so configure
+ # would drop it silently on headers without ID3D12VideoProcessor - fail instead.
+ && if [ "$BUILD_TARGET" = "win64" ]; then \
+      grep -q '^#define CONFIG_SCALE_D3D12_FILTER 1' config.h \
+        || { echo "ERROR: scale_d3d12 not enabled - check ID3D12VideoProcessor in the MinGW headers"; \
+             grep -i 'd3d12' ffbuild/config.log | tail -20; exit 1; }; \
+    fi \
  && make -j$(nproc) \
  && make install \
  \
