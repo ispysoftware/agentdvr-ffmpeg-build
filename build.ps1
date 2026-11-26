@@ -37,7 +37,7 @@ if ($Arch -eq "") {
     Write-Host "  x64     linux-x86_64 (Debian Buster, glibc 2.28)  VA-API, QSV, NVENC/NVDEC, Vulkan, AMF"
     Write-Host "  arm64   linux-arm64  (Debian Buster, glibc 2.28)  V4L2 M2M, Rockchip MPP, NVENC/NVDEC, Vulkan"
     Write-Host "  armhf   linux-armhf  (Debian Buster, glibc 2.28)  V4L2 M2M"
-    Write-Host "  win64   windows-x64  (MinGW-w64 cross)             D3D11VA, DXVA2, QSV, NVENC/NVDEC, AMF"
+    Write-Host "  win64   windows-x64  (Debian Bookworm, MinGW-w64)  D3D11VA, D3D12VA, DXVA2, QSV, NVENC/NVDEC, AMF"
     Write-Host "  both    x64 + arm64"
     Write-Host "  all     x64 + arm64 + armhf + win64"
     Write-Host ""
@@ -65,7 +65,9 @@ function Get-ArchConfig($a) {
         "x64"   { @{ Target = "x86_64"; Archive = "ffmpeg${FfmpegVer}${variantTag}-linux-x86_64.tar.xz";  OS = "linux"   } }
         "arm64" { @{ Target = "arm64";  Archive = "ffmpeg${FfmpegVer}${variantTag}-linux-arm64.tar.xz";   OS = "linux"   } }
         "armhf" { @{ Target = "armhf";  Archive = "ffmpeg${FfmpegVer}${variantTag}-linux-armhf.tar.xz";   OS = "linux"   } }
-        "win64" { @{ Target = "win64";  Archive = "ffmpeg${FfmpegVer}${variantTag}-windows-x64.zip";       OS = "windows" } }
+        # win64 builds on bookworm: buster's MinGW-w64 6.0 has no D3D12 video headers/GUIDs
+        # (needed by d3d12va), and Windows output has no glibc floor to keep.
+        "win64" { @{ Target = "win64";  Archive = "ffmpeg${FfmpegVer}${variantTag}-windows-x64.zip";       OS = "windows"; Base = "debian:bookworm" } }
     }
 }
 
@@ -98,6 +100,7 @@ foreach ($a in $archList) {
         "--build-arg", "VARIANT=$Variant",
         "-t", $tag
     )
+    if ($cfg.Base) { $buildArgs += @("--build-arg", "BASE_IMAGE=$($cfg.Base)") }
     if ($NoCache) { $buildArgs += "--no-cache" }
     $buildArgs += "."
 

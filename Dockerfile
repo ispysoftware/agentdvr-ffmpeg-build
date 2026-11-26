@@ -21,7 +21,7 @@
 #   arm64   V4L2 M2M  ·  Rockchip MPP (RK VPU, ignored on non-RK boards)
 #           NVENC/NVDEC (Jetson)  ·  Vulkan (Mali, VideoCore VII)
 #   x86_64  VA-API (Intel/AMD)  ·  QSV (Intel, libvpl)  ·  NVENC/NVDEC (NVIDIA)  ·  Vulkan  ·  AMF (AMD)
-#   win64   D3D11VA  ·  DXVA2  ·  QSV (Intel, libvpl)  ·  NVENC/NVDEC (NVIDIA)  ·  AMF (AMD)
+#   win64   D3D11VA  ·  D3D12VA  ·  DXVA2  ·  QSV (Intel, libvpl)  ·  NVENC/NVDEC (NVIDIA)  ·  AMF (AMD)
 #
 # ── Licence note ─────────────────────────────────────────────────────────────
 #   gpl variant:  --enable-gpl → GPL 2+ build (required for libx264/libx265).
@@ -83,10 +83,17 @@ ARG TARGET=armhf
 #           Hardware encoders and all decoders are unaffected.
 ARG VARIANT=gpl
 
+# ── Base image
+#    Linux targets stay on buster for the glibc 2.28 floor. win64 has no glibc floor and
+#    needs a newer MinGW-w64 than buster's 6.0, which lacks d3d12video.h and the D3D12 video
+#    GUIDs that --enable-d3d12va requires; build.ps1 passes debian:bookworm (MinGW-w64 10)
+#    for win64.
+ARG BASE_IMAGE=debian:buster
+
 # ============================================================================
 # Builder
 # ============================================================================
-FROM debian:buster AS builder
+FROM ${BASE_IMAGE} AS builder
 
 ARG FFMPEG_VER NASM_VER ZLIB_VER BZIP2_VER XZ_VER OPENSSL_VER
 ARG OGG_VER VORBIS_VER OPUS_VER LAME_VER VPX_VER DAV1D_VER X264_VER OPENH264_VER
@@ -95,18 +102,24 @@ ARG MPP_COMMIT MPP_SHA256
 ARG TARGET VARIANT
 
 ENV DEBIAN_FRONTEND=noninteractive
+# bookworm's pip refuses system-wide installs (PEP 668) without this; buster's pip ignores it.
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
 ENV SYSROOT=/opt/x-sysroot
 ENV FFMPEG_PREFIX=/opt/ffmpeg
 
 # ---------------------------------------------------------------------------
 # 0. Fix apt sources — Buster (Debian 10) reached EOL June 2024 and moved to
 #    the archive mirror. The archived Release files also have expired Valid-Until
-#    dates, so we disable that check. Safe for a build container.
+#    dates, so we disable that check. Safe for a build container. Other bases
+#    (bookworm for win64) keep their own sources.
 # ---------------------------------------------------------------------------
-RUN printf 'deb http://archive.debian.org/debian buster main\ndeb http://archive.debian.org/debian-security buster/updates main\n' \
-      > /etc/apt/sources.list \
- && printf 'Acquire::Check-Valid-Until "false";\n' \
-      > /etc/apt/apt.conf.d/99no-check-valid-until
+RUN . /etc/os-release \
+ && if [ "$VERSION_CODENAME" = "buster" ]; then \
+      printf 'deb http://archive.debian.org/debian buster main\ndeb http://archive.debian.org/debian-security buster/updates main\n' \
+        > /etc/apt/sources.list \
+      && printf 'Acquire::Check-Valid-Until "false";\n' \
+        > /etc/apt/apt.conf.d/99no-check-valid-until; \
+    fi
 
 # ---------------------------------------------------------------------------
 # 1. Toolchains & build utilities
@@ -171,7 +184,9 @@ RUN dpkg --add-architecture armhf \
       texinfo \
       gettext \
  && rm -rf /var/lib/apt/lists/* \
- && pip3 install --upgrade pip \
+ # --ignore-installed: on bookworm pip is Debian-managed and has no RECORD file, so a
+ # plain --upgrade fails trying to uninstall it; this installs the new pip alongside.
+ && pip3 install --upgrade --ignore-installed pip \
  # patchelf via pip (bundles a modern build) — used to stamp RUNPATH=$ORIGIN onto the
  # output .so files. Buster's apt patchelf is 0.9 (2016) and can corrupt binaries.
  && pip3 install meson ninja patchelf
@@ -236,7 +251,9 @@ case "$TARGET" in
   win64)
     # Windows x86-64 via MinGW-w64 cross-compiler.
     # Produces .dll files loadable by FFmpeg.AutoGen on Windows.
-    # D3D11VA and DXVA2 use Windows SDK headers bundled with MinGW-w64.
+    # D3D11VA, D3D12VA and DXVA2 use Windows SDK headers bundled with MinGW-w64.
+    # D3D12VA needs MinGW-w64 8+ (d3d12video.h): build on bookworm (build.ps1 does). It's
+    # enabled explicitly so configure fails instead of silently dropping it on old headers.
     # NVENC/NVDEC and AMF are header-only; drivers loaded at runtime.
     TRIPLE=x86_64-w64-mingw32
     ARCH_CFLAGS="-march=x86-64"
@@ -244,7 +261,7 @@ case "$TARGET" in
     VPX_TARGET=x86_64-win64-gcc
     FF_ARCH="--arch=x86_64"
     FF_EXTRA=""
-    FF_HW="--enable-d3d11va --enable-dxva2 --enable-nvenc --enable-nvdec --enable-amf --enable-libvpl"
+    FF_HW="--enable-d3d11va --enable-d3d12va --enable-dxva2 --enable-nvenc --enable-nvdec --enable-amf --enable-libvpl"
     FF_OS=mingw32
     FF_WIN_FLAGS="--enable-w32threads --windres=${TRIPLE}-windres"
     # -static-libgcc: FFmpeg 9's libswscale (fp16/int128 helpers) emits calls
@@ -371,9 +388,10 @@ WORKDIR /build
 # Buster ships MinGW-w64 6.0 which is missing timeapi.h (added in 7.0).
 # FFmpeg 8.1's vsrc_amf.c / vf_vpp_amf.c include it directly.
 # A stub that re-exports mmsystem.h (which has all the same declarations)
-# is the correct fix — identical to what MinGW-w64 7.0+ ships.
+# is the correct fix — identical to what MinGW-w64 7.0+ ships. Only written
+# when missing, so a newer MinGW's real header is left alone.
 # ---------------------------------------------------------------------------
-RUN if [ "$TARGET" = "win64" ]; then \
+RUN if [ "$TARGET" = "win64" ] && [ ! -f /usr/x86_64-w64-mingw32/include/timeapi.h ]; then \
       printf '#ifndef _TIMEAPI_H_\n#define _TIMEAPI_H_\n#include <mmsystem.h>\n#endif /* _TIMEAPI_H_ */\n' \
         > /usr/x86_64-w64-mingw32/include/timeapi.h; \
     fi
@@ -452,11 +470,13 @@ RUN . /env.sh && set -eux \
       unset CC CXX AR NM RANLIB STRIP; \
       OPENSSL_CROSS="--cross-compile-prefix=${TARGET_TRIPLE}-"; \
     fi \
+ # no-quic: FFmpeg only creates TLS/DTLS contexts (tls_openssl.c), never QUIC, so
+ # leaving OpenSSL's QUIC stack out removes code (and its CVEs) nothing can reach.
  && ./Configure ${OPENSSL_TARGET} \
       ${OPENSSL_CROSS} \
       --prefix=${SYSROOT} --openssldir=${SYSROOT}/ssl \
       --libdir=lib \
-      no-shared no-tests no-apps \
+      no-shared no-tests no-apps no-quic \
  && make -j$(nproc) || make -j$(nproc) \
  && make install_sw \
  && cd /build && rm -rf openssl-*
