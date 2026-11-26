@@ -1048,7 +1048,7 @@ RUN . /env.sh && set -eux \
  # win64: scale_d3d12 (GPU resize on D3D12 frames) is autodetected, not requested, so configure
  # would drop it silently on headers without ID3D12VideoProcessor - fail instead.
  && if [ "$BUILD_TARGET" = "win64" ]; then \
-      grep -q '^#define CONFIG_SCALE_D3D12_FILTER 1' config.h \
+      grep -q '^#define CONFIG_SCALE_D3D12_FILTER 1' config_components.h \
         || { echo "ERROR: scale_d3d12 not enabled - check ID3D12VideoProcessor in the MinGW headers"; \
              grep -i 'd3d12' ffbuild/config.log | tail -20; exit 1; }; \
     fi \
