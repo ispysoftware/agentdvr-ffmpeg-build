@@ -194,6 +194,15 @@ RUN dpkg --add-architecture armhf \
  && pip3 install meson ninja patchelf
 
 # ---------------------------------------------------------------------------
+# 1b. Current CA roots for source downloads. Buster's ca-certificates predates Let's
+#     Encrypt's 2026 hierarchy (YR1 -> Root YR); hosts that renewed onto it, starting with
+#     downloads.xiph.org on 2026-11-20, fail wget with exit 5 (certificate verification)
+#     because buster's GnuTLS doesn't fetch missing intermediates. Take the bundle from a
+#     current Debian instead. On the trixie base (win64) this replaces the file with itself.
+# ---------------------------------------------------------------------------
+COPY --from=debian:trixie /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+# ---------------------------------------------------------------------------
 # 2. Per-target environment
 #    Writes /env.sh (sourced by every subsequent RUN step) and
 #    /etc/meson/cross.ini (used by dav1d and libdrm on cross-compile targets).
