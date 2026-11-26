@@ -85,9 +85,9 @@ ARG VARIANT=gpl
 
 # ── Base image
 #    Linux targets stay on buster for the glibc 2.28 floor. win64 has no glibc floor and
-#    needs a newer MinGW-w64 than buster's 6.0, which lacks d3d12video.h and the D3D12 video
-#    GUIDs that --enable-d3d12va requires; build.ps1 passes debian:bookworm (MinGW-w64 10)
-#    for win64.
+#    needs MinGW-w64 12+ for d3d12video.h (ID3D12VideoDecoder), which --enable-d3d12va
+#    requires: buster ships 6.0 and bookworm 10.0, neither has it. build.ps1 passes
+#    debian:trixie (MinGW-w64 12, GCC 14) for win64.
 ARG BASE_IMAGE=debian:buster
 
 # ============================================================================
@@ -102,7 +102,7 @@ ARG MPP_COMMIT MPP_SHA256
 ARG TARGET VARIANT
 
 ENV DEBIAN_FRONTEND=noninteractive
-# bookworm's pip refuses system-wide installs (PEP 668) without this; buster's pip ignores it.
+# bookworm+ pip refuses system-wide installs (PEP 668) without this; buster's pip ignores it.
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 ENV SYSROOT=/opt/x-sysroot
 ENV FFMPEG_PREFIX=/opt/ffmpeg
@@ -111,7 +111,7 @@ ENV FFMPEG_PREFIX=/opt/ffmpeg
 # 0. Fix apt sources — Buster (Debian 10) reached EOL June 2024 and moved to
 #    the archive mirror. The archived Release files also have expired Valid-Until
 #    dates, so we disable that check. Safe for a build container. Other bases
-#    (bookworm for win64) keep their own sources.
+#    (trixie for win64) keep their own sources.
 # ---------------------------------------------------------------------------
 RUN . /etc/os-release \
  && if [ "$VERSION_CODENAME" = "buster" ]; then \
@@ -184,7 +184,7 @@ RUN dpkg --add-architecture armhf \
       texinfo \
       gettext \
  && rm -rf /var/lib/apt/lists/* \
- # --ignore-installed: on bookworm pip is Debian-managed and has no RECORD file, so a
+ # --ignore-installed: on bookworm+ pip is Debian-managed and has no RECORD file, so a
  # plain --upgrade fails trying to uninstall it; this installs the new pip alongside.
  && pip3 install --upgrade --ignore-installed pip \
  # patchelf via pip (bundles a modern build) — used to stamp RUNPATH=$ORIGIN onto the
@@ -199,6 +199,9 @@ RUN dpkg --add-architecture armhf \
 RUN <<'SETUP'
 set -e
 mkdir -p /opt/x-sysroot /opt/ffmpeg /etc/meson
+
+# C-only flags; set per target below (win64 only).
+C_COMPAT_FLAGS=""
 
 case "$TARGET" in
   armhf)
@@ -252,7 +255,7 @@ case "$TARGET" in
     # Windows x86-64 via MinGW-w64 cross-compiler.
     # Produces .dll files loadable by FFmpeg.AutoGen on Windows.
     # D3D11VA, D3D12VA and DXVA2 use Windows SDK headers bundled with MinGW-w64.
-    # D3D12VA needs MinGW-w64 8+ (d3d12video.h): build on bookworm (build.ps1 does). It's
+    # D3D12VA needs MinGW-w64 12+ (d3d12video.h): build on trixie (build.ps1 does). It's
     # enabled explicitly so configure fails instead of silently dropping it on old headers.
     # NVENC/NVDEC and AMF are header-only; drivers loaded at runtime.
     TRIPLE=x86_64-w64-mingw32
@@ -275,8 +278,14 @@ case "$TARGET" in
     # _FORTIFY_SOURCE=0 for the same reason: opus's configure adds -D_FORTIFY_SOURCE=2 unless
     # it is already defined, and MinGW-w64 8+ implements it with __memcpy_chk/__memset_chk
     # from libssp - libopus.a then fails FFmpeg's link test ("opus not found"). Buster's
-    # MinGW 6 had no fortify support, so this only bit once win64 moved to bookworm.
+    # MinGW 6 had no fortify support, so this only bit once win64 moved to a newer base.
     HARDENING_FLAGS="-D_FORTIFY_SOURCE=0"
+    # win64 builds on trixie (GCC 14), which turns several long-standing C warnings into
+    # errors by default. The older C deps (lame 3.100, libvorbis, bzip2...) were written for
+    # GCC 8 on buster; keep these as warnings so they build as before. C only - the C++
+    # compiler rejects these options, and FFmpeg's configure re-adds
+    # -Werror=implicit-function-declaration for FFmpeg's own code.
+    C_COMPAT_FLAGS="-Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=incompatible-pointer-types -Wno-error=return-mismatch"
     MESON_CPU_FAMILY=x86_64 ; MESON_CPU=x86_64 ; MESON_SYSTEM=windows
     IS_CROSS=1 ; BUILD_TARGET=win64
     ;;
@@ -361,7 +370,7 @@ export NM="${NM_VAL}"
 export STRIP="${STRIP_VAL}"
 export RANLIB="${RANLIB_VAL}"
 export OBJCOPY="${OBJCOPY_VAL}"
-export CFLAGS="${ARCH_CFLAGS} -O2 -pipe -fPIC ${HARDENING_FLAGS}"
+export CFLAGS="${ARCH_CFLAGS} -O2 -pipe -fPIC ${HARDENING_FLAGS} ${C_COMPAT_FLAGS}"
 export CXXFLAGS="${ARCH_CFLAGS} -O2 -pipe -fPIC ${HARDENING_FLAGS}"
 export CPPFLAGS="-I/opt/x-sysroot/include"
 export LDFLAGS="-L/opt/x-sysroot/lib"
